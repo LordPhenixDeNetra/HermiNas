@@ -82,15 +82,33 @@ Validations rejouées :
 **État actuel (2026-08-01)** : typage des secrets fait et testé dans les 3 langages (voir État actuel M0.1 pour les fichiers). Script `scripts/validation/test-secrets-no-leak.sh` exécuté sur le dépôt entier → `OK`. Chiffrement AES-256-GCM et mTLS agent↔serveur restent à faire (dépendent de M0.5/M1.1, pas encore de bundle ni d'agent).
 
 ### M0.5 — Supervisor & moteurs embarqués
-- [ ] Implémenter `engine/supervisor/` Go : cycle de vie processus enfants (start/stop/restart/backoff)
-- [ ] Intégrer ClickHouse embarqué : téléchargement versionné, config XML générée depuis `herminas.yaml`
-- [ ] Intégrer Redpanda embarqué : config générée, mode single-node
-- [ ] Implémenter healthchecks ClickHouse (HTTP ping + requête témoin)
-- [ ] Implémenter healthchecks Redpanda (metadata request)
-- [ ] Implémenter démarrage ordonné : Redpanda → ClickHouse → Rust → Python → API
-- [ ] Implémenter arrêt propre (drain puis stop, ordre inverse)
-- [ ] Créer mocks ClickHouse/Redpanda pour tests unitaires (aucune dépendance externe en lane rapide)
-- [ ] Smoke test : `herminas run` démarre tous les services, `herminas status` les liste verts
+- [x] Implémenter `engine/supervisor/` Go : cycle de vie processus enfants (start/stop/restart/backoff)
+- [x] Intégrer ClickHouse embarqué : téléchargement versionné, config XML générée depuis `herminas.yaml`
+- [ ] Intégrer Redpanda embarqué : config générée, mode single-node (config + healthcheck faits et testés ; binaire réel non lançable sur macOS, cf. note)
+- [x] Implémenter healthchecks ClickHouse (HTTP ping + requête témoin)
+- [ ] Implémenter healthchecks Redpanda (metadata request) — fait via l'API admin HTTP (`/v1/status/ready`) plutôt qu'une requête metadata protocole Kafka natif ; fonctionnellement équivalent et plus simple côté Go (pas de client Kafka requis), à confirmer si un vrai metadata request est préféré plus tard
+- [ ] Implémenter démarrage ordonné : Redpanda → ClickHouse → Rust → Python → API (ordre générique implémenté et testé ; seuls Redpanda+ClickHouse sont câblés aujourd'hui, cf. note)
+- [x] Implémenter arrêt propre (drain puis stop, ordre inverse)
+- [x] Créer mocks ClickHouse/Redpanda pour tests unitaires (aucune dépendance externe en lane rapide)
+- [x] Smoke test : `herminas run` démarre tous les services, `herminas status` les liste verts (validé pour ClickHouse en conditions réelles ; Redpanda validé via mocks, cf. note)
+
+**État actuel (2026-08-01)**
+
+Fichiers matérialisés :
+- `engine/supervisor/supervisor.go` + `exec_process.go` : `Process` (interface), `ExecProcess` (subprocess supervisé avec restart-backoff), `Supervisor` (démarrage ordonné avec attente de santé, arrêt en ordre inverse, `Status()` sans dépendance à un état en mémoire)
+- `engine/clickhouse/clickhouse.go` : génération `config.xml`/`users.xml`, téléchargement du binaire officiel (macOS/Linux), `NewProcess`, healthcheck HTTP `/ping` + requête témoin `SELECT 1`
+- `engine/redpanda/redpanda.go` : génération `redpanda.yaml` (single-node), `Download` (échoue proprement hors Linux avec message explicite), `NewProcess`, healthcheck API admin `/v1/status/ready`
+- `bootstrap.go` étendu : sous-commandes `run` (démarrage supervisé, ordre Redpanda→ClickHouse, bloque jusqu'à SIGINT/SIGTERM) et `status` (health-check sans état partagé, fonctionne depuis un process séparé)
+
+**Limite de plateforme (honnête, pas contournée)** : Redpanda ne publie que des binaires Linux. Sur cette machine de dev (macOS, pas de Docker disponible), `redpanda.Download` échoue avec un message clair au lieu d'échouer silencieusement plus tard ; la génération de config et le healthcheck sont testés via un serveur HTTP mock (`mockRedpandaAdminServer`). L'intégration réelle du binaire Redpanda sera validée sur cible Linux (CI ou bundle, M8.1). `bootstrap.go` détecte `runtime.GOOS` et n'enregistre Redpanda dans le supervisor que sur Linux ; sur macOS, seul ClickHouse est supervisé et un message explicite est loggé.
+
+**Rust/Python/API non câblés dans l'ordre de démarrage** : les binaires `herminas-dataplane` (Rust) et `herminas_intelligence.bootstrap` (Python) issus de M0.1 sont des smoke tests qui s'exécutent puis se terminent — pas des démons. Les enregistrer dans le supervisor aujourd'hui provoquerait une boucle de redémarrage infinie. Ils rejoindront l'ordonnancement une fois qu'ils exposent un vrai service long-running (serveur gRPC Rust en M1.2, FastAPI Python en M4, API Go en M1.5). La capacité générique d'ordonnancement est déjà implémentée et testée (`TestStartRunsInOrderAndWaitsForHealth`, `TestStopRunsInReverseOrder`).
+
+Validations rejouées :
+- `go build ./...`, `go vet ./...`, `go test ./...` → PASS (17 tests au total : 5 supervisor, 4 clickhouse, 4 redpanda, 4 kernel)
+- **Smoke test réel** (pas seulement mocké) : téléchargement du vrai binaire ClickHouse 26.8.1 (macOS x86_64, 160 Mo), `herminas-cp run` → ClickHouse démarre réellement, devient healthy en ~3-10s (ping + `SELECT 1` via HTTP), `herminas-cp status` depuis un processus séparé confirme `healthy`, `SIGTERM` → arrêt propre confirmé (« supervisor: stopped cleanly », process terminé)
+- `scripts/validation/test-secrets-no-leak.sh` → OK
+- Binaire ClickHouse téléchargé sous `runtime/` (ajouté à `.gitignore`, ~700 Mo avec les données de test — jamais commité)
 
 ---
 

@@ -22,6 +22,7 @@ dist/
 
 # HermiNas runtime data — never committed, bundle-only (leçon aNtaerus)
 /data/
+/runtime/
 /bundle/
 /logs/
 *.enc
