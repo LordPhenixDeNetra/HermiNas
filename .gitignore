@@ -1,0 +1,32 @@
+# Go
+/herminas
+*.exe
+
+# Rust
+/rust/target/
+**/target/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+/python/dist/
+/python/build/
+.pytest_cache/
+
+# Node / web (M1.6+)
+node_modules/
+dist/
+.vite/
+
+# HermiNas runtime data — never committed, bundle-only (leçon aNtaerus)
+/data/
+/bundle/
+/logs/
+*.enc
+.env
+
+# OS / editor
+.DS_Store
+.idea/

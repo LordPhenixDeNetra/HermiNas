@@ -1,0 +1,11 @@
+[package]
+name = "herminas-dataplane-bootstrap"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "herminas-dataplane"
+path = "src/bootstrap.rs"
+
+[dependencies]
+herminas-kernel = { path = "../kernel" }
