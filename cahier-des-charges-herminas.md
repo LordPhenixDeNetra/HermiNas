@@ -4,7 +4,7 @@
 ## Plateforme souveraine de données temps réel — Stack polyglotte Go/Rust/Python/TypeScript
 ## Basé sur les leçons apprises d'aNtaerus (architecture L0-L3, config immuable, secrets typés)
 
----
+----
 
 ## Table des matières
 
