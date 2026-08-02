@@ -115,15 +115,43 @@ Validations rejouées :
 ## Phase M1 — Ingestion → Requête (4 semaines)
 
 ### M1.1 — Agent Rust (collecte)
-- [ ] Implémenter `agent/collect/file.rs` : tail de fichiers logs (rotation, multiline, checkpoint)
-- [ ] Implémenter `agent/collect/http.rs` : endpoint HTTP/JSON local (axum)
-- [ ] Implémenter `agent/parse/` : JSON, CSV, regex nommées (grok-like)
-- [ ] Implémenter `agent/buffer/wal.rs` : write-ahead log disque, reprise après crash
-- [ ] Implémenter `agent/ship/` : batching, compression zstd, envoi gRPC mTLS
-- [ ] Implémenter backpressure : ralentissement collecte si WAL > seuil
-- [ ] Implémenter config agent YAML + rechargement à la demande (commande serveur)
-- [ ] Binaire statique < 20 MB (musl), test empreinte RAM < 50 MB sous charge
-- [ ] Tests : coupure réseau simulée → zéro perte après reconnexion
+- [x] Implémenter `agent/collect/file.rs` : tail de fichiers logs (rotation, multiline, checkpoint)
+- [x] Implémenter `agent/collect/http.rs` : endpoint HTTP/JSON local (axum)
+- [x] Implémenter `agent/parse/` : JSON, CSV, regex nommées (grok-like)
+- [x] Implémenter `agent/buffer/wal.rs` : write-ahead log disque, reprise après crash
+- [ ] Implémenter `agent/ship/` : batching, compression zstd, envoi gRPC mTLS — batching+zstd faits et testés réellement ; transport gRPC mTLS non fait, cf. note
+- [x] Implémenter backpressure : ralentissement collecte si WAL > seuil
+- [ ] Implémenter config agent YAML + rechargement à la demande (commande serveur) — YAML fait et testé ; rechargement à la demande fait via SIGHUP (local), pas encore via commande serveur distante, cf. note
+- [ ] Binaire statique < 20 MB (musl), test empreinte RAM < 50 MB sous charge — RAM validée réellement (< 50 MB) ; binaire natif macOS 4,4 Mo (< 20 MB) mais pas de build statique musl Linux, cf. note
+- [x] Tests : coupure réseau simulée → zéro perte après reconnexion (via un `Shipper` défaillant simulé, cf. note)
+
+**État actuel (2026-08-02)**
+
+Fichiers matérialisés — nouveau crate `rust/agent/` (workspace member) :
+- `src/collect/file.rs` : `FileTailer` — tail incrémental avec checkpoint persistant (reprise exacte après redémarrage), détection de rotation (changement d'inode), jointure multiligne par regex de début d'enregistrement
+- `src/collect/http.rs` : serveur axum (`/ingest`, `/healthz`), accepte un ou plusieurs objets JSON newline-delimited
+- `src/parse/{json,csv_format,regex_format}.rs` : les 3 formats demandés, `regex_format` couvre le besoin « grok-like » via les groupes nommés natifs de la crate `regex` (`(?P<name>...)`), sans dépendance grok dédiée
+- `src/buffer/wal.rs` : WAL fsync à chaque append, fichier d'ack séparé, `pending()`/`ack()`/`compact()`
+- `src/backpressure.rs` : délai croissant au-delà du seuil configuré, plafonné
+- `src/ship/mod.rs` : trait `Shipper` + `FileShipper` (batching + compression zstd réels, framing longueur-préfixée)
+- `src/main.rs` : boucle complète (tail + HTTP → parse → WAL → backpressure → ship périodique), reload de config sur SIGHUP, flush différé des enregistrements multilignes en attente après 4 polls inactifs (~2 s)
+
+**Bug réel trouvé et corrigé pendant les tests** : la première implémentation de `push_line` mettait en attente la ligne courante même en mode non-multiligne, donc chaque ligne n'apparaissait qu'au poll suivant. Les 5 tests `collect::file` ont échoué immédiatement après écriture, révélant le bug ; corrigé, puis les 5 tests passent.
+
+**Transport gRPC mTLS non fait (honnête, pas contourné)** : dépend du contrat `agent.proto` (M0.3, non fait) et du récepteur `stream/receiver.rs` (M1.2, non fait). `ship::Shipper` est le point d'extension : `FileShipper` fait tourner pour de vrai le chemin batching+compression zstd contre un fichier local ; un futur `GrpcShipper` implémentera le même trait sans rien changer en amont.
+
+**Rechargement à la demande partiel** : `config::load` est rejouable (testé), et `main.rs` installe un handler SIGHUP qui recharge le fichier de config et logge — mais ne redémarre pas encore dynamiquement les tailers avec la nouvelle liste de sources. Le rechargement piloté par une commande serveur distante dépend de `GetAgentConfig` (M0.3) et de la gestion de flotte (M8.3).
+
+**Binaire statique musl non fait** : cross-compiler vers `x86_64-unknown-linux-musl` depuis ce Mac demanderait un toolchain supplémentaire (`cargo-zigbuild` ou équivalent) non installé. Le build natif macOS release fait 4,4 Mo (3,6 Mo strippé), largement sous la barre des 20 Mo — mais ça ne valide pas le binaire musl Linux visé par le bundle (M8.1).
+
+**Test « coupure réseau simulée »** : pas de vrai réseau à couper puisque le transport gRPC n'existe pas encore. À la place, `ship::tests::flaky_shipper_causes_zero_loss_until_it_recovers` utilise un `Shipper` qui échoue 2 fois avant de réussir, contre un vrai WAL : la garantie testée (rien n'est acqui­tté tant que le ship échoue, donc zéro perte) est exactement celle qu'un `GrpcShipper` devra respecter plus tard.
+
+Validations rejouées :
+- `cargo build --workspace`, `cargo clippy --workspace --all-targets` → PASS, zéro warning
+- `cargo test --workspace` → PASS (31 tests `herminas-agent` + 3 `herminas-kernel`)
+- **Smoke test réel bout-en-bout** : binaire `herminas-agent` lancé pour de vrai, événement initial de fichier + ligne ajoutée en cours de route + requête HTTP POST réelle → les 3 enregistrements retrouvés corrects après décompression zstd dans le fichier shippé (vérifié avec un exemple `decode_shipped` temporaire, supprimé après usage)
+- **Test de charge réel** : 20 000 lignes fichier + 500 requêtes HTTP → RSS stable à ~4,3 Mo (budget 50 Mo), WAL et ack progressent de façon cohérente, arrêt brutal (`kill`) laisse un petit reliquat non acquitté par conception (sera rejoué au prochain démarrage — comportement voulu du WAL, pas un bug)
+- `go`/Python/Rust kernel : aucune régression (déjà vérifié en M0)
 
 ### M1.2 — Réception serveur & bus (Rust)
 - [ ] Implémenter `stream/receiver.rs` : serveur gRPC réception batches agents
