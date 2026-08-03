@@ -34,25 +34,32 @@ export default function Layout() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <span className="brand">HermiNas</span>
-        <nav>
-          <NavLink to="/query">Query Studio</NavLink>
+    <div className="flex flex-1 flex-col">
+      <header className="flex flex-nowrap items-center gap-6 border-b border-border bg-surface px-5 py-2.5 max-[600px]:flex-wrap max-[600px]:gap-x-3 max-[600px]:gap-y-2">
+        <span className="font-semibold">HermiNas</span>
+        <nav className="flex flex-1 gap-4 max-[600px]:order-3 max-[600px]:basis-full">
+          <NavLink
+            to="/query"
+            className={({ isActive }) =>
+              `no-underline transition-colors duration-150 ${isActive ? "font-semibold text-accent" : "text-muted-fg"}`
+            }
+          >
+            Query Studio
+          </NavLink>
         </nav>
-        <div className="header-right">
-          <button onClick={toggle} aria-label="Toggle color theme" title="Toggle color theme">
+        <div className="flex items-center gap-2.5">
+          <button onClick={toggle} className="btn" aria-label="Toggle color theme" title="Toggle color theme">
             <ThemeIcon theme={theme} />
           </button>
-          {username && <span className="username">{username}</span>}
+          {username && <span className="text-[13px] text-muted-fg">{username}</span>}
           {username && (
-            <button onClick={handleLogout} aria-label="Sign out">
+            <button onClick={handleLogout} className="btn" aria-label="Sign out">
               Sign out
             </button>
           )}
         </div>
       </header>
-      <main>
+      <main className="flex-1 p-5">
         <Outlet />
       </main>
     </div>

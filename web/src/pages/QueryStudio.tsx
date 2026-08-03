@@ -53,8 +53,8 @@ export default function QueryStudio() {
   }, [result]);
 
   return (
-    <div className="query-studio">
-      <div className="query-studio-editor">
+    <div className="grid items-start gap-5 grid-cols-[1fr_240px] max-[900px]:grid-cols-1">
+      <div className="col-start-1 overflow-hidden rounded-lg border border-border">
         <Editor
           height="240px"
           defaultLanguage="sql"
@@ -63,27 +63,27 @@ export default function QueryStudio() {
           onMount={(_editor, monaco) => registerSqlCompletionOnce(monaco)}
           options={{ minimap: { enabled: false }, fontSize: 14, automaticLayout: true }}
         />
-        <div className="query-studio-actions">
-          <button onClick={handleRun} disabled={running || !sql.trim()}>
+        <div className="flex gap-2 border-t border-border bg-surface p-2.5">
+          <button onClick={handleRun} className="btn btn-primary" disabled={running || !sql.trim()}>
             {running ? "Running…" : "Run query"}
           </button>
-          <button onClick={exportCsv} disabled={!result || result.rows.length === 0}>
+          <button onClick={exportCsv} className="btn" disabled={!result || result.rows.length === 0}>
             Export CSV
           </button>
-          <button onClick={exportJson} disabled={!result}>
+          <button onClick={exportJson} className="btn" disabled={!result}>
             Export JSON
           </button>
         </div>
       </div>
 
       {error && (
-        <p role="alert" className="error">
+        <p role="alert" className="rounded-md bg-danger-bg px-3 py-2 text-danger">
           {error}
         </p>
       )}
 
       {result && (
-        <div className="query-studio-results">
+        <div className="col-start-1">
           <p>
             {result.row_count} row{result.row_count === 1 ? "" : "s"}
             {result.cached ? " (cached)" : ""}
@@ -92,16 +92,16 @@ export default function QueryStudio() {
         </div>
       )}
 
-      <aside className="query-studio-sidebar">
+      <aside className="col-start-2 flex flex-col gap-5 max-[900px]:col-start-1">
         <section>
-          <h2>History</h2>
+          <h2 className="mb-2 text-[13px] uppercase tracking-[0.06em] text-muted-fg">History</h2>
           {history.length === 0 ? (
-            <p className="empty-state">No queries yet</p>
+            <p className="italic text-muted-fg">No queries yet</p>
           ) : (
-            <ul>
+            <ul className="flex flex-col gap-1">
               {history.map((q) => (
                 <li key={q}>
-                  <button onClick={() => setSql(q)} title={q}>
+                  <button onClick={() => setSql(q)} title={q} className="w-full cursor-pointer truncate bg-transparent text-left">
                     {q}
                   </button>
                 </li>
@@ -111,11 +111,11 @@ export default function QueryStudio() {
         </section>
 
         <section>
-          <h2>Datasets</h2>
+          <h2 className="mb-2 text-[13px] uppercase tracking-[0.06em] text-muted-fg">Datasets</h2>
           {!datasets || datasets.length === 0 ? (
-            <p className="empty-state">No datasets yet</p>
+            <p className="italic text-muted-fg">No datasets yet</p>
           ) : (
-            <ul>
+            <ul className="flex flex-col gap-1">
               {datasets.map((d) => (
                 <li key={d.name}>{d.name}</li>
               ))}

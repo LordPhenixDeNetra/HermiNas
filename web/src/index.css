@@ -76,10 +76,6 @@
   --danger-bg: #fdecea;
 }
 
-* {
-  box-sizing: border-box;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -89,230 +85,29 @@
   }
 }
 
-body {
-  margin: 0;
-}
-
-#root {
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-}
-
-button {
-  font: inherit;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
-}
-button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-button[type="submit"],
-.query-studio-actions button:first-child {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
-}
-
-input {
-  font: inherit;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 8px 10px;
-  transition: border-color 150ms ease;
-}
-input:focus-visible {
-  border-color: var(--accent);
-}
-
-.error {
-  color: var(--danger);
-  background: var(--danger-bg);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin: 8px 0;
-}
-
-.empty-state {
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-/* --- Login --- */
-.login-page {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.login-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 320px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px;
-}
-.login-form h1 {
-  margin: 0 0 8px;
-  font-size: 22px;
-}
-.login-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-/* --- App shell --- */
-.app-shell {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-.app-header {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-.app-header .brand {
-  font-weight: 600;
-}
-.app-header nav {
-  flex: 1;
-  display: flex;
-  gap: 16px;
-}
-.app-header nav a {
-  color: var(--text-muted);
-  text-decoration: none;
-  transition: color 150ms ease;
-}
-.app-header nav a.active {
-  color: var(--accent);
-  font-weight: 600;
-}
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-@media (max-width: 600px) {
-  .app-header {
-    flex-wrap: wrap;
-    row-gap: 8px;
-    gap: 12px;
+/* Shared native-element primitives (button/input) live here via @apply
+   rather than as a JSX <Button>/<Input> component — there's no shared
+   wrapper component today, and introducing one purely to hold styling
+   would be a bigger structural change than this migration calls for.
+   Everything else is expressed as utility classes directly in JSX. */
+@layer components {
+  .btn {
+    @apply cursor-pointer rounded-md border border-border bg-surface px-3 py-1.5 text-fg transition-colors duration-150 ease-out;
   }
-  .app-header nav {
-    order: 3;
-    flex-basis: 100%;
+  .btn:hover:not(:disabled) {
+    @apply border-accent;
   }
-}
-
-main {
-  flex: 1;
-  padding: 20px;
-}
-
-/* --- Query Studio --- */
-.query-studio {
-  display: grid;
-  grid-template-columns: 1fr 240px;
-  gap: 20px;
-  align-items: start;
-}
-.query-studio-editor {
-  grid-column: 1;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.query-studio-actions {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.query-studio-results {
-  grid-column: 1;
-}
-.query-studio-sidebar {
-  grid-column: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.query-studio-sidebar h2 {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  margin: 0 0 8px;
-}
-.query-studio-sidebar ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.query-studio-sidebar li button {
-  width: 100%;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border: none;
-  background: transparent;
-}
-
-@media (max-width: 900px) {
-  .query-studio {
-    grid-template-columns: 1fr;
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-50;
   }
-  .query-studio-sidebar {
-    grid-column: 1;
+  .btn-primary {
+    @apply border-accent bg-accent text-accent-fg;
   }
-}
 
-/* --- Results table --- */
-.results-table {
-  width: 100%;
-  overflow-x: auto;
-  display: block;
-  border-collapse: collapse;
-  margin-top: 8px;
-  font-size: 13px;
-}
-.results-table th,
-.results-table td {
-  border: 1px solid var(--border);
-  padding: 6px 10px;
-  text-align: left;
-  white-space: nowrap;
-}
-.results-table th {
-  background: var(--surface);
-  position: sticky;
-  top: 0;
+  .input {
+    @apply rounded-md border border-border bg-surface px-2.5 py-2 text-fg transition-colors duration-150 ease-out;
+  }
+  .input:focus-visible {
+    @apply border-accent outline-none;
+  }
 }
