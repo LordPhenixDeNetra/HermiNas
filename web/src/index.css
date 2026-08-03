@@ -60,6 +60,15 @@
   box-sizing: border-box;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 body {
   margin: 0;
 }
@@ -78,6 +87,7 @@ button {
   border-radius: 6px;
   padding: 6px 12px;
   cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
 }
 button:hover:not(:disabled) {
   border-color: var(--accent);
@@ -100,6 +110,10 @@ input {
   color: var(--text);
   border-radius: 6px;
   padding: 8px 10px;
+  transition: border-color 150ms ease;
+}
+input:focus-visible {
+  border-color: var(--accent);
 }
 
 .error {
@@ -169,6 +183,7 @@ input {
 .app-header nav a {
   color: var(--text-muted);
   text-decoration: none;
+  transition: color 150ms ease;
 }
 .app-header nav a.active {
   color: var(--accent);
@@ -178,6 +193,18 @@ input {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+@media (max-width: 600px) {
+  .app-header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    gap: 12px;
+  }
+  .app-header nav {
+    order: 3;
+    flex-basis: 100%;
+  }
 }
 
 main {

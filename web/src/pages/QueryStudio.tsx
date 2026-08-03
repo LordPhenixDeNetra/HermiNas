@@ -99,9 +99,11 @@ export default function QueryStudio() {
             <p className="empty-state">No queries yet</p>
           ) : (
             <ul>
-              {history.map((q, i) => (
-                <li key={i}>
-                  <button onClick={() => setSql(q)}>{q}</button>
+              {history.map((q) => (
+                <li key={q}>
+                  <button onClick={() => setSql(q)} title={q}>
+                    {q}
+                  </button>
                 </li>
               ))}
             </ul>
