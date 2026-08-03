@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://herminas.dev/schemas/websocket/envelope.schema.json",
+  "title": "WebSocket message envelope",
+  "description": "Every message the Go control plane pushes to React over the WebSocket hub (M2.1) uses this envelope; `payload` is validated against the event-specific schema in this directory.",
+  "type": "object",
+  "required": ["event", "payload"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": [
+        "dashboard.data",
+        "query.rows",
+        "alert.fired",
+        "anomaly.detected",
+        "pipeline.status",
+        "system.health",
+        "agent.status"
+      ]
+    },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

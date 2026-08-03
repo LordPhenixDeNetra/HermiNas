@@ -59,16 +59,40 @@ Validations rejouées :
 **État actuel (2026-08-01)** : `git init` fait, `.gitignore` couvre `target/`, `.venv/`, `node_modules/`, `data/`, `bundle/`, `*.enc`, `.env`. Reste de M0.2 (GitHub Actions, linters par langage, Taskfile.yml, pre-commit) non commencé.
 
 ### M0.3 — Contrats gRPC & communication
-- [ ] Définir `kernel/proto/dataplane.proto` : DeployPipeline, StopPipeline, GetPipelineStats, DeployModel, DeployRule, StreamEvents, GetHealth
-- [ ] Définir `kernel/proto/intelligence.proto` : TranslateNL, TrainModel, ExportONNX, Forecast, GetHealth
-- [ ] Définir `kernel/proto/agent.proto` : ShipBatch, GetAgentConfig, Heartbeat
-- [ ] Générer les stubs Go (`protoc-gen-go` + `protoc-gen-go-grpc`)
-- [ ] Générer les stubs Rust (`tonic-build`)
-- [ ] Générer les stubs Python (`grpcio-tools`)
-- [ ] Définir les schémas JSON WebSocket Go ↔ React (`kernel/schemas/`)
-- [ ] Implémenter le bus d'événements interne Go (channels + goroutines)
-- [ ] Benchmark latence Go ↔ Rust gRPC (< 5ms) avec script de validation
-- [ ] Benchmark latence Go ↔ Python gRPC (< 50ms) avec script de validation
+- [x] Définir `kernel/proto/dataplane.proto` : DeployPipeline, StopPipeline, GetPipelineStats, DeployModel, DeployRule, StreamEvents, GetHealth
+- [x] Définir `kernel/proto/intelligence.proto` : TranslateNL, TrainModel, ExportONNX, Forecast, GetHealth
+- [x] Définir `kernel/proto/agent.proto` : ShipBatch, GetAgentConfig, Heartbeat
+- [x] Générer les stubs Go (`protoc-gen-go` + `protoc-gen-go-grpc`)
+- [x] Générer les stubs Rust (`tonic-build`)
+- [x] Générer les stubs Python (`grpcio-tools`)
+- [x] Définir les schémas JSON WebSocket Go ↔ React (`kernel/schemas/`)
+- [x] Implémenter le bus d'événements interne Go (channels + goroutines)
+- [x] Benchmark latence Go ↔ Rust gRPC (< 5ms) avec script de validation
+- [x] Benchmark latence Go ↔ Python gRPC (< 50ms) avec script de validation
+
+**État actuel (2026-08-02)**
+
+Toolchains installées localement (mêmes principes que Go/Node en M0.1) : `protoc` 35.1 (`~/sdk/protoc`), `protoc-gen-go`/`protoc-gen-go-grpc` (`go install`), `grpcio`/`grpcio-tools` (venv Python). Les 4 `.proto` vivent sous `kernel/proto/` et sont la source de vérité unique pour les 3 langages : `common.proto` (HealthRequest/HealthStatus partagés) + `dataplane.proto`, `intelligence.proto`, `agent.proto`, tous générés avec `-I kernel/proto` et des imports par nom de fichier nu (`import "common.proto";`) pour rester cohérents entre `protoc`, `tonic-build` et `grpc_tools.protoc`.
+
+Fichiers matérialisés :
+- Go : `kernel/proto/{common,dataplane,intelligence,agent}pb/*.go` (générés)
+- Rust : nouveau crate `rust/protocol/` (`herminas-protocol`) — `build.rs` compile les 4 `.proto` via `tonic-build` en deux passes (`common.proto` d'abord, puis les autres avec `extern_path(".herminas.common.v1", "crate::common::v1")` — la résolution relative automatique de prost échouait sur les préfixes de package partagés, cf. commentaire dans `build.rs`) ; `src/bin/dataplane_server.rs` implémente réellement `GetHealth`, le reste renvoie `UNIMPLEMENTED` avec un message pointant vers la phase qui l'implémentera (M3.2/M4.3/M6.2/M4.2)
+- Python : `python/src/herminas_proto/*_pb2*.py` (générés, imports relatifs corrigés après coup — `grpc_tools.protoc` émet des imports absolus qui ne fonctionnent pas une fois le module empaqueté) ; `python/src/herminas_intelligence/grpc_server.py` implémente réellement `GetHealth`, le reste hérite du `UNIMPLEMENTED` par défaut du servicer généré
+- `kernel/schemas/websocket/*.schema.json` : enveloppe + 7 schémas de payload (un par événement `cahier §6.2`), validés par `kernel/schemas/websocket_test.go` avec un vrai validateur JSON Schema (`santhosh-tekuri/jsonschema/v5`), pas juste un contrôle de syntaxe JSON
+- `engine/bus/bus.go` : bus pub/sub générique (topics = noms d'événements WebSocket), `Publish` non bloquant (drop + compteur si un abonné est saturé), `Unsubscribe` idempotent
+- `engine/health/grpc_bench_test.go` : bench réel Go→Rust et Go→Python, skip proprement si les serveurs ne tournent pas (lane rapide reste sans dépendance externe)
+
+**Un vrai bug de concurrence trouvé par le race detector, pas avant** : la première version de `engine/bus` lisait la liste des abonnés sous `RLock` puis envoyait sur les canaux après avoir relâché le verrou — une `Unsubscribe` concurrente pouvait fermer un canal entre-temps, causant un `panic: send on closed channel`. `go test -race` l'a détecté immédiatement sur le test de concurrence. Corrigé en unifiant sur un seul `sync.Mutex` couvrant tout le cycle lecture+envoi ; revérifié avec `-race -count=5`, stable.
+
+**RPCs au-delà de GetHealth non implémentés (attendu, pas un manque)** : `DeployPipeline`, `TrainModel`, etc. n'ont pas de logique métier — M0.3 ne demande que les contrats + la preuve que la plomberie gRPC fonctionne. Chaque méthode non implémentée renvoie `UNIMPLEMENTED` avec un message explicite plutôt qu'un succès simulé.
+
+Validations rejouées :
+- `go build ./...`, `go vet ./...`, `go test ./...` → PASS (nouveaux packages `engine/bus`, `engine/health`, `kernel/schemas`, `kernel/proto/*pb` inclus)
+- `go test ./engine/bus/... -race -count=5` → PASS, aucune race
+- `cargo build --workspace`, `cargo clippy --workspace --all-targets`, `cargo test --workspace` → PASS (crate `herminas-protocol` inclus)
+- `pytest` (venv) → PASS
+- **Benchmark gRPC réel** (serveurs Rust et Python réellement lancés, pas mockés) : Go↔Rust `GetHealth` p50=356µs p99=1.1ms (budget 5ms) ; Go↔Python `GetHealth` p50=426µs p99=0.9ms (budget 50ms) — les deux confortablement sous budget
+- `scripts/validation/test-secrets-no-leak.sh` → OK
 
 ### M0.4 — Sécurité fondamentale
 - [x] Implémenter `SecretString` Go (marshal masqué : String, GoString, MarshalJSON, MarshalText)

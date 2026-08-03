@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+// Go control plane -> Python intelligence. Go is always the client
+// (cahier des charges §6.4); the Python server lives in
+// python/src/herminas_intelligence/grpc_server.py.
+//
+// Only GetHealth has a real implementation as of M0.3, for the same reason
+// as dataplane.proto: proving the gRPC plumbing end to end. NL->SQL (M4.1),
+// training (M4.3) and forecasting (M4.3) implement the rest; calling them
+// today returns UNIMPLEMENTED.
+package herminas.intelligence.v1;
+
+option go_package = "herminas/kernel/proto/intelligencepb";
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+service Intelligence {
+  rpc TranslateNL(NLQuery) returns (SQLCandidate);
+  rpc TrainModel(TrainRequest) returns (stream TrainProgress);
+  rpc ExportONNX(ModelId) returns (ONNXArtifact);
+  rpc Forecast(ForecastRequest) returns (ForecastResult);
+  rpc GetHealth(herminas.common.v1.HealthRequest) returns (herminas.common.v1.HealthStatus);
+}
+
+message NLQuery {
+  string question = 1;
+  string language = 2; // "fr" | "en"
+  repeated string allowed_datasets = 3;
+}
+
+message SQLCandidate {
+  string sql = 1;
+  string explanation = 2;
+  bool valid = 3;
+}
+
+message ModelId {
+  string id = 1;
+}
+
+message TrainRequest {
+  string dataset = 1;
+  string model_type = 2; // "anomaly" | "fraud" | "forecast"
+}
+
+message TrainProgress {
+  double progress = 1; // 0.0-1.0
+  string stage = 2;
+  string message = 3;
+}
+
+message ONNXArtifact {
+  string model_id = 1;
+  bytes onnx_bytes = 2;
+}
+
+message ForecastRequest {
+  string dataset = 1;
+  string metric = 2;
+  uint32 horizon_minutes = 3;
+}
+
+message ForecastResult {
+  repeated double values = 1;
+  repeated google.protobuf.Timestamp timestamps = 2;
+}

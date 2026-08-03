@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://herminas.dev/schemas/websocket/query.rows.schema.json",
+  "title": "query.rows payload",
+  "description": "Streamed result chunks for a Query Studio query (M1.4 querybroker).",
+  "type": "object",
+  "required": ["query_id", "rows", "done"],
+  "properties": {
+    "query_id": { "type": "string" },
+    "rows": { "type": "array", "items": { "type": "object" } },
+    "done": { "type": "boolean" },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

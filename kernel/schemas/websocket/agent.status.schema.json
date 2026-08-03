@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://herminas.dev/schemas/websocket/agent.status.schema.json",
+  "title": "agent.status payload",
+  "description": "Fleet connectivity state pushed to the Agents page (UI-108, M8.3).",
+  "type": "object",
+  "required": ["agent_id", "connected", "last_seen_at"],
+  "properties": {
+    "agent_id": { "type": "string" },
+    "connected": { "type": "boolean" },
+    "last_seen_at": { "type": "string", "format": "date-time" },
+    "hostname": { "type": "string" }
+  },
+  "additionalProperties": false
+}

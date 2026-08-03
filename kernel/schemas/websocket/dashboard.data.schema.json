@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://herminas.dev/schemas/websocket/dashboard.data.schema.json",
+  "title": "dashboard.data payload",
+  "description": "Pushed to a subscribed widget on its configured interval (M2.1/M2.2).",
+  "type": "object",
+  "required": ["widget_id", "rows"],
+  "properties": {
+    "widget_id": { "type": "string" },
+    "rows": { "type": "array", "items": { "type": "object" } },
+    "generated_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

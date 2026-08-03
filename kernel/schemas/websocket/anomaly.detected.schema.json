@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://herminas.dev/schemas/websocket/anomaly.detected.schema.json",
+  "title": "anomaly.detected payload",
+  "description": "Forwarded from the Rust anomaly detector (M4.2) via StreamEvents (dataplane.proto) through Go to the UI.",
+  "type": "object",
+  "required": ["dataset", "metric", "score", "detected_at"],
+  "properties": {
+    "dataset": { "type": "string" },
+    "metric": { "type": "string" },
+    "score": { "type": "number" },
+    "threshold": { "type": "number" },
+    "detected_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

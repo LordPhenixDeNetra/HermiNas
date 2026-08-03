@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+// Go control plane -> Rust data plane. Go is always the client here
+// (cahier des charges §6.3); the Rust server lives in rust/protocol/.
+//
+// Only GetHealth has a real implementation as of M0.3 — it exists to prove
+// the gRPC plumbing works end to end (protoc -> stubs in 3 languages ->
+// real server -> real client -> latency benchmark). The rest are the
+// contracts the pipeline manager (M3.2), ML deploy (M4.3) and WASM rules
+// (M6.2) will implement against; calling them today returns UNIMPLEMENTED.
+package herminas.dataplane.v1;
+
+option go_package = "herminas/kernel/proto/dataplanepb";
+
+import "common.proto";
+import "google/protobuf/timestamp.proto";
+
+service DataPlane {
+  rpc DeployPipeline(PipelineSpec) returns (DeployResult);
+  rpc StopPipeline(PipelineId) returns (StopResult);
+  rpc GetPipelineStats(PipelineId) returns (PipelineStats);
+  rpc DeployModel(ModelSpec) returns (DeployResult);   // ONNX
+  rpc DeployRule(RuleSpec) returns (DeployResult);     // WASM
+  rpc StreamEvents(EventFilter) returns (stream Event); // anomalies, DLQ
+  rpc GetHealth(herminas.common.v1.HealthRequest) returns (herminas.common.v1.HealthStatus);
+}
+
+message PipelineId {
+  string id = 1;
+}
+
+message PipelineSpec {
+  string id = 1;
+  string name = 2;
+  string yaml_config = 3; // declarative pipeline (F-201), parsed in M3
+}
+
+message DeployResult {
+  bool success = 1;
+  string message = 2;
+}
+
+message StopResult {
+  bool success = 1;
+  string message = 2;
+}
+
+message PipelineStats {
+  string pipeline_id = 1;
+  uint64 events_in = 2;
+  uint64 events_out = 3;
+  uint64 events_error = 4;
+  double p99_latency_ms = 5;
+}
+
+message ModelSpec {
+  string model_id = 1;
+  bytes onnx_artifact = 2;
+  string dataset = 3;
+}
+
+message RuleSpec {
+  string rule_id = 1;
+  bytes wasm_artifact = 2;
+  string dataset = 3;
+}
+
+message EventFilter {
+  repeated string datasets = 1;
+  repeated string event_types = 2; // e.g. "anomaly.detected", "dlq"
+}
+
+message Event {
+  string id = 1;
+  string dataset = 2;
+  string type = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  bytes payload = 5;
+  map<string, string> metadata = 6;
+}

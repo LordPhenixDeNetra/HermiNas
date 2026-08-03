@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://herminas.dev/schemas/websocket/alert.fired.schema.json",
+  "title": "alert.fired payload",
+  "description": "Pushed when the alerting engine (M5.1) fires a rule.",
+  "type": "object",
+  "required": ["alert_id", "rule_id", "severity", "message", "fired_at"],
+  "properties": {
+    "alert_id": { "type": "string" },
+    "rule_id": { "type": "string" },
+    "severity": { "type": "string", "enum": ["info", "warning", "critical"] },
+    "message": { "type": "string" },
+    "fired_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

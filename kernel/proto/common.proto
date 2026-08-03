@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+// Shared L0 contract: every service's GetHealth returns this shape, so Go's
+// supervisor/health can treat DataPlane, Intelligence and (once it exists)
+// the agent fleet uniformly. Mirrors kernel/contracts's HealthStatus (Go),
+// herminas_kernel::contracts::HealthStatus (Rust), herminas_kernel.contracts
+// (Python) — this proto becomes the actual wire format those converge on.
+package herminas.common.v1;
+
+option go_package = "herminas/kernel/proto/commonpb";
+
+import "google/protobuf/timestamp.proto";
+
+message HealthRequest {}
+
+message HealthStatus {
+  string service = 1;
+  // "unknown" | "starting" | "healthy" | "degraded" | "unhealthy"
+  string state = 2;
+  string message = 3;
+  google.protobuf.Timestamp checked_at = 4;
+}

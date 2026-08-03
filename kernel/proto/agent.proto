@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+// Rust agent (rust/agent/) -> Rust data plane receiver. The agent is
+// always the client; the receiver (stream/receiver.rs, M1.2) doesn't exist
+// yet, so rust/agent's ship::Shipper still targets a local file
+// (ship::FileShipper) — see tasks-herminas.md M1.1/M1.2 for the plan to
+// swap in a GrpcShipper once this contract has a real server.
+package herminas.agent.v1;
+
+option go_package = "herminas/kernel/proto/agentpb";
+
+import "google/protobuf/timestamp.proto";
+
+service Agent {
+  rpc ShipBatch(BatchRequest) returns (BatchAck);
+  rpc GetAgentConfig(AgentConfigRequest) returns (AgentConfigResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message BatchRequest {
+  string agent_id = 1;
+  string dataset = 2;
+  // zstd-compressed, length-prefixed records — same framing as
+  // rust/agent/src/ship's FileShipper writes today (see read_shipped_batches).
+  bytes compressed_payload = 3;
+  uint32 record_count = 4;
+}
+
+message BatchAck {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message AgentConfigRequest {
+  string agent_id = 1;
+}
+
+message AgentConfigResponse {
+  string yaml_config = 1;
+  string config_version = 2;
+}
+
+message HeartbeatRequest {
+  string agent_id = 1;
+  google.protobuf.Timestamp sent_at = 2;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://herminas.dev/schemas/websocket/system.health.schema.json",
+  "title": "system.health payload",
+  "description": "Same shape as kernel/contracts's HealthStatus and common.proto's HealthStatus (M0.1/M0.3) — the supervisor's heartbeat for one managed service.",
+  "type": "object",
+  "required": ["service", "state", "checked_at"],
+  "properties": {
+    "service": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["unknown", "starting", "healthy", "degraded", "unhealthy"]
+    },
+    "message": { "type": "string" },
+    "checked_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}
