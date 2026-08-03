@@ -20,11 +20,14 @@ node_modules/
 dist/
 .vite/
 
-# HermiNas runtime data — never committed, bundle-only (leçon aNtaerus)
-/data/
-/runtime/
-/bundle/
-/logs/
+# HermiNas runtime data — never committed, bundle-only (leçon aNtaerus).
+# Not root-anchored: `herminas-dataplane serve` and `herminas-cp run` both
+# default to a `data/`/`runtime/` relative to wherever they're launched
+# from (e.g. `rust/data/` when run with cwd=rust/ during manual testing).
+data/
+runtime/
+bundle/
+logs/
 *.enc
 .env
 

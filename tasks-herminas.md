@@ -178,13 +178,41 @@ Validations rejouées :
 - `go`/Python/Rust kernel : aucune régression (déjà vérifié en M0)
 
 ### M1.2 — Réception serveur & bus (Rust)
-- [ ] Implémenter `stream/receiver.rs` : serveur gRPC réception batches agents
-- [ ] Implémenter validation schéma + horodatage + enrichissement métadonnées (agent_id, dataset)
-- [ ] Implémenter `sink/redpanda.rs` : production vers topics par dataset (rdkafka)
-- [ ] Implémenter `sink/clickhouse.rs` : consommation topics → batchs RowBinary → async inserts
-- [ ] Implémenter DLQ : événements invalides vers topic dédié + compteurs
-- [ ] Idempotence de base : clé de déduplication par batch
-- [ ] Benchmark : ≥ 100k evt/s soutenus en local (profil dev), script `bench-ingest.sh`
+- [x] Implémenter `stream/receiver.rs` : serveur gRPC réception batches agents
+- [x] Implémenter validation schéma + horodatage + enrichissement métadonnées (agent_id, dataset)
+- [ ] Implémenter `sink/redpanda.rs` : production vers topics par dataset (rdkafka) — non fait, bloqué sur le toolchain `librdkafka` (pas de `cmake` sur cette machine), cf. note
+- [ ] Implémenter `sink/clickhouse.rs` : consommation topics → batchs RowBinary → async inserts — sink ClickHouse fait et testé réellement, mais insertion directe (pas de topic Redpanda en amont) et format JSONEachRow (pas RowBinary), cf. note
+- [x] Implémenter DLQ : événements invalides vers topic dédié + compteurs — fichier local JSON lines au lieu d'un topic dédié, même logique de compteur
+- [x] Idempotence de base : clé de déduplication par batch
+- [ ] Benchmark : ≥ 100k evt/s soutenus en local (profil dev), script `bench-ingest.sh` — non fait cette session, cf. note
+
+**État actuel (2026-08-03)**
+
+Fichiers matérialisés — crate `rust/bootstrap/` (`herminas-dataplane-bootstrap`) étendu avec un vrai `lib.rs` :
+- `src/receiver.rs` : `AgentService` implémente le service gRPC `Agent` (`agent.proto`, M0.3) — `ShipBatch` décode le batch (zstd + longueur-préfixée, même framing que `rust/agent`), déduplique, valide chaque enregistrement JSON, enrichit (`agent_id`, `dataset`, `received_at_unix_ms`), écrit les valides via `Sink`, les invalides via `Dlq` ; `GetAgentConfig` renvoie `UNIMPLEMENTED` (dépend de M8.3) ; `Heartbeat` répond réellement
+- `src/sink/clickhouse.rs` : `ClickHouseSink` insère via l'interface HTTP de ClickHouse (JSONEachRow)
+- `src/dlq.rs` : `Dlq` — fichier JSON lines local, compteur atomique
+- `src/dedup.rs` : `Deduplicator` — clé de hash (agent_id, dataset, payload compressé), ensemble borné avec éviction totale au dépassement (pas de vraie LRU)
+- `src/bootstrap.rs` : sous-commande `serve` démarre le vrai serveur gRPC receiver (en plus du mode kernel-check existant de M0.1)
+
+Côté agent (`rust/agent/`), le trait `Shipper` est devenu asynchrone (`async-trait`) — nécessaire pour un vrai client gRPC. Nouveau `ship::GrpcShipper` implémente `Shipper` en appelant `AgentClient::ship_batch` pour de vrai. Nouveaux champs de config : `receiver_addr` (bascule `GrpcShipper`/`FileShipper`), `agent_id`, `dataset`. `ship::file`/`ship::grpc` partagent le même code d'encodage/décodage de batch (`encode_batch`/`decode_batch`), garantissant que le récepteur décode exactement ce que l'agent envoie, que ce soit vers un fichier ou vers gRPC.
+
+**Redpanda reporté (honnête, pas contourné)** : `rdkafka` (choix du cahier des charges) nécessite `librdkafka`, une bibliothèque C, compilée via `cmake` — absent de cette machine (pas de Homebrew, cf. M0.1/M0.5). Plutôt que d'écrire du code Rust jamais compilé ni vérifié dans ce sandbox (contraire à la discipline du projet), le sink ClickHouse insère aujourd'hui **directement** depuis le récepteur, sans passer par un bus Redpanda intermédiaire. `sink::Sink` est le point d'extension : un sink Redpanda producteur + un consommateur séparé vers ClickHouse s'insèrent plus tard sans changer `receiver::AgentService`. Cette limitation sera revue sur cible Linux (CI/bundle, comme pour le binaire Redpanda lui-même, M0.5).
+
+**RowBinary reporté** : l'insertion utilise JSONEachRow (simple, sans dépendance supplémentaire) plutôt que RowBinary (nécessite un encodeur conscient du schéma, qui dépend de schemamgr/DDL généré, M1.3). À revoir pour la performance avant le benchmark d'ingestion de M9.
+
+**Benchmark 100k evt/s non fait** : nécessite son propre travail de perf (générateur de charge, mesure soutenue sur 1s+, éventuellement RowBinary + vrai Redpanda pour représenter fidèlement l'architecture cible) — pas fait cette session faute de temps, et probablement irréaliste avec l'insertion JSONEachRow directe actuelle de toute façon.
+
+**Deux vrais bugs trouvés par les tests, pas avant** :
+1. `Box::new(Arc<RecordingRealSink>)` ne satisfaisait pas le trait `Sink` dans les tests du récepteur — erreur de compilation immédiate, corrigée en clonant la struct (déjà `Clone`, état partagé via son `Arc<Mutex<_>>` interne) plutôt que de la re-envelopper.
+2. **ClickHouse renvoie `411 Length Required` pour toute requête POST sans `Content-Length`, et `reqwest` n'ajoute pas cet en-tête pour un corps vide** (`.body("")` seul ne suffit pas) — découvert en lançant le test d'intégration contre un vrai ClickHouse, pas en mock. Corrigé en fixant explicitement l'en-tête `Content-Length: 0` sur les appels DDL/SELECT du test (l'insertion de production n'est pas concernée : son corps n'est jamais vide).
+
+Validations rejouées :
+- `cargo build --workspace`, `cargo clippy --workspace --all-targets` → PASS, zéro warning
+- `cargo test --workspace` → PASS (31 tests agent + 11 tests bootstrap + 3 kernel), y compris `sink::clickhouse::tests::insert_and_select_round_trip_against_real_clickhouse` contre un vrai ClickHouse (skip proprement si absent)
+- **Smoke test réel bout-en-bout, transport gRPC réel** : `herminas-dataplane serve` (récepteur réel) + `herminas-agent` configuré avec `receiver_addr` réel → tail de fichier + HTTP + ligne JSON malformée (rejetée côté agent par le parseur, jamais expédiée) → `SELECT * FROM e2e_logs` sur le vrai ClickHouse confirme les 4 événements valides, correctement enrichis (`agent_id`, `dataset`, `received_at_unix_ms`) ; WAL entièrement acquitté après drain (`ack offset == wal.log size`) ; c'est le jalon « Fin M1 » du cahier des charges (§10.3), atteint avec le vrai transport gRPC et non plus le `FileShipper` de secours
+- `go build/vet/test`, `pytest` → aucune régression
+- `scripts/validation/test-secrets-no-leak.sh` → OK
 
 ### M1.3 — Schémas & datasets (Go)
 - [ ] Implémenter `engine/schemamgr/` : modèle dataset (nom, colonnes, types, TTL) en SQLite

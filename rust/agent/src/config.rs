@@ -24,8 +24,24 @@ pub struct AgentConfig {
     #[serde(default = "default_http_addr")]
     pub http_addr: String,
     pub wal_path: PathBuf,
-    /// Destination for `ship::FileShipper` until the gRPC transport lands
-    /// (M0.3/M1.2) — see the crate-level doc comment in lib.rs.
+    /// gRPC address of the Rust data-plane receiver's Agent service
+    /// (`stream/receiver.rs`, M1.2). When set, the agent ships via
+    /// `ship::GrpcShipper`; when absent, it falls back to
+    /// `ship::FileShipper` writing to `ship_output_path` — useful for dev
+    /// setups and tests without a receiver running.
+    #[serde(default)]
+    pub receiver_addr: Option<String>,
+    /// Identifies this agent to the receiver (BatchRequest.agent_id) and
+    /// tags DLQ/dedup entries. Defaults to the machine hostname.
+    #[serde(default = "default_agent_id")]
+    pub agent_id: String,
+    /// Dataset this agent's sources belong to (BatchRequest.dataset).
+    /// One agent per dataset for now; multi-dataset agents land with
+    /// per-source routing in a later phase.
+    #[serde(default = "default_dataset")]
+    pub dataset: String,
+    /// FileShipper destination, used only when `receiver_addr` is unset.
+    #[serde(default = "default_ship_output_path")]
     pub ship_output_path: PathBuf,
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
@@ -33,6 +49,18 @@ pub struct AgentConfig {
     pub flush_interval_ms: u64,
     #[serde(default = "default_backpressure_threshold")]
     pub backpressure_threshold_bytes: u64,
+}
+
+fn default_agent_id() -> String {
+    // A real deployment always sets this explicitly (M8.3 fleet
+    // enrollment assigns a stable ID); this default only covers local dev.
+    std::env::var("HOSTNAME").unwrap_or_else(|_| "agent-local".to_string())
+}
+fn default_dataset() -> String {
+    "default".to_string()
+}
+fn default_ship_output_path() -> PathBuf {
+    PathBuf::from("shipped.bin")
 }
 
 fn default_http_addr() -> String {

@@ -9,3 +9,15 @@ path = "src/bootstrap.rs"
 
 [dependencies]
 herminas-kernel = { path = "../kernel" }
+herminas-protocol = { path = "../protocol" }
+tokio = { version = "1", features = ["full"] }
+tonic = "0.12"
+zstd = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = "0.12"
+async-trait = "0.1"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"

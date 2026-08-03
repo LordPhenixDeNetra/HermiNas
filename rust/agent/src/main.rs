@@ -104,7 +104,27 @@ async fn main() -> Result<(), AgentError> {
     }
 
     let backpressure = Backpressure::new(cfg.backpressure_threshold_bytes);
-    let shipper = ship::FileShipper::new(cfg.ship_output_path.clone());
+
+    // GrpcShipper when a receiver is configured (M1.2's stream/receiver.rs),
+    // FileShipper otherwise (dev mode / tests without a receiver running).
+    let shipper: Box<dyn ship::Shipper> = match &cfg.receiver_addr {
+        Some(addr) => {
+            println!("herminas-agent: shipping to receiver at {addr} (agent_id={}, dataset={})", cfg.agent_id, cfg.dataset);
+            Box::new(
+                ship::GrpcShipper::connect(addr.clone(), cfg.agent_id.clone(), cfg.dataset.clone())
+                    .await
+                    .map_err(|e| AgentError::Config(format!("cannot connect to receiver at {addr}: {e}")))?,
+            )
+        }
+        None => {
+            println!(
+                "herminas-agent: no receiver_addr configured, shipping to file {:?} (dev mode)",
+                cfg.ship_output_path
+            );
+            Box::new(ship::FileShipper::new(cfg.ship_output_path.clone()))
+        }
+    };
+
     let mut flush_tick = tokio::time::interval(Duration::from_millis(cfg.flush_interval_ms));
 
     loop {
@@ -134,7 +154,7 @@ async fn main() -> Result<(), AgentError> {
                 }
             }
             _ = flush_tick.tick() => {
-                if let Err(e) = drain_and_ship(&mut wal, &shipper, cfg.batch_size) {
+                if let Err(e) = drain_and_ship(&mut wal, shipper.as_ref(), cfg.batch_size).await {
                     eprintln!("herminas-agent: ship failed, will retry next tick: {e}");
                 }
             }
@@ -142,13 +162,13 @@ async fn main() -> Result<(), AgentError> {
     }
 }
 
-fn drain_and_ship(wal: &mut Wal, shipper: &dyn ship::Shipper, batch_size: usize) -> Result<(), AgentError> {
+async fn drain_and_ship(wal: &mut Wal, shipper: &dyn ship::Shipper, batch_size: usize) -> Result<(), AgentError> {
     let pending = wal.pending()?;
     if pending.is_empty() {
         return Ok(());
     }
     for chunk in pending.chunks(batch_size.max(1)) {
-        shipper.ship(chunk)?;
+        shipper.ship(chunk).await?;
         wal.ack(chunk.last().unwrap().offset)?;
     }
     Ok(())
