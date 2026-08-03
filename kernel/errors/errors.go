@@ -5,7 +5,10 @@
 // of failure carries the same name across languages.
 package errors
 
-import "fmt"
+import (
+	stderrors "errors"
+	"fmt"
+)
 
 type Code string
 
@@ -42,3 +45,14 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Cause }
+
+// Is reports whether err is (or wraps) a HermiNas *Error with the given
+// code, so callers can branch on failure class without a type switch.
+func Is(err error, code Code) bool {
+	var herr *Error
+	return stderrors.As(err, &herr) && herr.Code == code
+}
+
+func IsNotFound(err error) bool        { return Is(err, CodeNotFound) }
+func IsAlreadyExists(err error) bool   { return Is(err, CodeAlreadyExists) }
+func IsInvalidArgument(err error) bool { return Is(err, CodeInvalidArgument) }

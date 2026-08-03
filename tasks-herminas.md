@@ -215,11 +215,31 @@ Validations rejouées :
 - `scripts/validation/test-secrets-no-leak.sh` → OK
 
 ### M1.3 — Schémas & datasets (Go)
-- [ ] Implémenter `engine/schemamgr/` : modèle dataset (nom, colonnes, types, TTL) en SQLite
-- [ ] Générer DDL ClickHouse MergeTree (ORDER BY, PARTITION BY date, TTL)
-- [ ] Implémenter création/évolution de dataset via API (`POST /api/v1/datasets`)
-- [ ] Implémenter registry de schémas versionné (compatibilité ascendante)
-- [ ] Auto-création de dataset à la première ingestion (option, schéma inféré)
+- [x] Implémenter `engine/schemamgr/` : modèle dataset (nom, colonnes, types, TTL) en SQLite
+- [x] Générer DDL ClickHouse MergeTree (ORDER BY, PARTITION BY date, TTL)
+- [x] Implémenter création/évolution de dataset via API (`POST /api/v1/datasets`) — handlers HTTP prêts, pas encore montés dans un serveur réel (dépend de M1.5), cf. note
+- [x] Implémenter registry de schémas versionné (compatibilité ascendante)
+- [x] Auto-création de dataset à la première ingestion (option, schéma inféré)
+
+**État actuel (2026-08-03)**
+
+Fichiers matérialisés — nouveau package `engine/schemamgr/` :
+- `dataset.go` : `Dataset`/`Column`, `Validate()`, `CheckBackwardCompatible()` — n'autorise que l'ajout de colonnes (pas de suppression, pas de changement de type, pas de passage non-nullable→... plus strict)
+- `infer.go` : `InferColumns()` déduit les colonnes depuis un enregistrement JSON échantillon (bool→Bool, nombre entier→Int64, nombre à virgule→Float64, chaîne/null/objet/tableau→String), sorties triées par nom pour un DDL déterministe
+- `ddl.go` : `GenerateDDL()` — `CREATE TABLE ... ENGINE = MergeTree()` avec `PARTITION BY toYYYYMM(...)`, `ORDER BY (...)` (ou `tuple()` si aucune clé), `TTL ... + INTERVAL n DAY`, identifiants entre backticks
+- `store.go` : persistance SQLite (`modernc.org/sqlite`, pilote pur Go — pas de CGO, compatible avec les binaires statiques `CGO_ENABLED=0`) ; table `datasets` (dernière version) + `dataset_versions` (historique complet) ; `Create`, `Get`, `List`, `AddColumns` (bascule de version + contrôle de compatibilité), `EnsureDataset` (auto-création avec `OrderBy=[received_at_unix_ms]` si ce champ d'enrichissement du récepteur M1.2 est présent)
+- `http.go` : handlers `net/http.ServeMux` (patterns Go 1.22+, aucune dépendance routeur) — `POST/GET /api/v1/datasets`, `GET /api/v1/datasets/{name}`, `GET /api/v1/datasets/{name}/versions`, `POST /api/v1/datasets/{name}/columns`
+- `kernel/errors/errors.go` étendu : `Is`, `IsNotFound`, `IsAlreadyExists`, `IsInvalidArgument` — nécessaires pour mapper proprement les erreurs du store vers les codes HTTP (404/409/400)
+
+**Handlers HTTP pas encore montés dans un vrai serveur** : `Handler.Routes()` retourne un `http.Handler` complet et testé (via `httptest`), mais aucun binaire ne l'expose encore — le serveur HTTP/2 + TLS + JWT est explicitement le périmètre de M1.5. Monter ces routes dans un serveur qui n'existe pas encore aurait été prématuré ; `Routes()` est le point de montage prêt à l'emploi.
+
+**Auto-création pas encore branchée au récepteur Rust** : `EnsureDataset` existe et fonctionne, mais `rust/bootstrap`'s `AgentService` (M1.2) insère toujours directement par nom de table codé en dur — le brancher pour de vrai demanderait soit une nouvelle RPC (Go schemamgr appelé depuis Rust), soit que le récepteur Go lui-même absorbe l'ingestion HTTP. Pas fait cette session ; le composant Go est prêt et testé indépendamment.
+
+Validations rejouées :
+- `go build ./...`, `go vet ./...`, `go test ./...` → PASS (30 nouveaux tests `engine/schemamgr` : validation, compatibilité ascendante, inférence, DDL, store SQLite, handlers HTTP)
+- **DDL généré vérifié contre un vrai ClickHouse** (`TestGeneratedDDLIsValidClickHouseSQL`, skip proprement si absent) : `CREATE TABLE` avec le DDL généré à partir d'un schéma inféré → `INSERT` JSONEachRow → `SELECT` confirme la valeur insérée — prouve que le DDL généré n'est pas juste une chaîne plausible mais du SQL ClickHouse valide et exécutable
+- **Un processus orphelin de M0.5 découvert et nettoyé pendant cette vérification** : le superviseur Go (`go run bootstrap.go run`) lancé lors d'une session précédente tournait toujours en arrière-plan (PID reparenté à `init` après la sortie du wrapper `go run`), et sa propre logique de restart-backoff (`engine/supervisor`, M0.5) relançait ClickHouse à chaque tentative d'arrêt — comportement correct du superviseur, juste un oubli de nettoyage de ma part. Arrêté proprement en ciblant le vrai PID du binaire compilé plutôt que celui du wrapper `go run`.
+- `scripts/validation/test-secrets-no-leak.sh` → OK
 
 ### M1.4 — Query broker (Go)
 - [ ] Implémenter `engine/querybroker/` : exécution SQL sur ClickHouse (HTTP), timeout, annulation
