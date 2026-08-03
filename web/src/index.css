@@ -1,3 +1,23 @@
+@import "tailwindcss";
+
+/* Maps the existing runtime theme variables (below) onto Tailwind's color
+   namespace via `inline` so utilities like `bg-surface`/`text-muted-fg`
+   resolve through `var(--surface)` at paint time instead of a value baked
+   in at build time — the light/dark toggle keeps working for Tailwind
+   utility classes exactly like it already does for the hand-written CSS
+   below. */
+@theme inline {
+  --color-canvas: var(--bg);
+  --color-surface: var(--surface);
+  --color-fg: var(--text);
+  --color-muted-fg: var(--text-muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-contrast);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+}
+
 :root {
   --bg: #f7f7f9;
   --surface: #ffffff;

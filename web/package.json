@@ -21,6 +21,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -31,6 +32,7 @@
     "@vitest/ui": "^3.2.7",
     "jsdom": "^30.0.1",
     "oxlint": "^1.75.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^6.4.3",
     "vitest": "^3.2.7"
