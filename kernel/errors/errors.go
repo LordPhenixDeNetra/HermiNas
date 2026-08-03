@@ -13,12 +13,13 @@ import (
 type Code string
 
 const (
-	CodeInvalidArgument Code = "invalid_argument"
-	CodeNotFound        Code = "not_found"
-	CodeUnauthorized    Code = "unauthorized"
-	CodeInternal        Code = "internal"
-	CodeUnavailable     Code = "unavailable"
-	CodeAlreadyExists   Code = "already_exists"
+	CodeInvalidArgument   Code = "invalid_argument"
+	CodeNotFound          Code = "not_found"
+	CodeUnauthorized      Code = "unauthorized"
+	CodeInternal          Code = "internal"
+	CodeUnavailable       Code = "unavailable"
+	CodeAlreadyExists     Code = "already_exists"
+	CodeResourceExhausted Code = "resource_exhausted"
 )
 
 // Error is HermiNas' standard error type: a stable code plus a
@@ -53,6 +54,7 @@ func Is(err error, code Code) bool {
 	return stderrors.As(err, &herr) && herr.Code == code
 }
 
-func IsNotFound(err error) bool        { return Is(err, CodeNotFound) }
-func IsAlreadyExists(err error) bool   { return Is(err, CodeAlreadyExists) }
-func IsInvalidArgument(err error) bool { return Is(err, CodeInvalidArgument) }
+func IsNotFound(err error) bool          { return Is(err, CodeNotFound) }
+func IsAlreadyExists(err error) bool     { return Is(err, CodeAlreadyExists) }
+func IsInvalidArgument(err error) bool   { return Is(err, CodeInvalidArgument) }
+func IsResourceExhausted(err error) bool { return Is(err, CodeResourceExhausted) }

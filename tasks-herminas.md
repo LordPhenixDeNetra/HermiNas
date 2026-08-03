@@ -242,11 +242,36 @@ Validations rejouées :
 - `scripts/validation/test-secrets-no-leak.sh` → OK
 
 ### M1.4 — Query broker (Go)
-- [ ] Implémenter `engine/querybroker/` : exécution SQL sur ClickHouse (HTTP), timeout, annulation
-- [ ] Implémenter streaming des résultats (chunks) vers l'API
-- [ ] Implémenter quotas basiques : requêtes/min par utilisateur, max lignes scannées
-- [ ] Implémenter cache résultats court TTL pour requêtes identiques
-- [ ] Journaliser chaque requête dans l'audit (append-only)
+- [x] Implémenter `engine/querybroker/` : exécution SQL sur ClickHouse (HTTP), timeout, annulation
+- [x] Implémenter streaming des résultats (chunks) vers l'API
+- [x] Implémenter quotas basiques : requêtes/min par utilisateur, max lignes scannées
+- [x] Implémenter cache résultats court TTL pour requêtes identiques
+- [x] Journaliser chaque requête dans l'audit (append-only) — version M1.4 (fichier JSON lines) ; filtres/export/redaction PII restent M7.2
+
+**État actuel (2026-08-03)**
+
+Fichiers matérialisés — nouveau package `engine/querybroker/` :
+- `broker.go` : `Execute` (résultat bufferisé, avec cache+audit) et `Stream` (livraison ligne par ligne au fur et à mesure via `bufio.Scanner` sur le corps HTTP en direct, pas de bufferisation complète — annulation via `context.Context` propagée nativement par `http.NewRequestWithContext`) ; force `FORMAT JSONEachRow` sur chaque requête pour un résultat ligne-par-ligne
+- `quota.go` : `RequestsPerMinute` (fenêtre glissante par utilisateur) + `MaxRowsToRead` — passé directement à ClickHouse comme réglage `max_rows_to_read`, donc c'est le moteur lui-même qui interrompt une requête trop gourmande, pas une vérification a posteriori après avoir tout scanné
+- `cache.go` : cache clé=SQL exacte, expiration paresseuse à la lecture, TTL=0 désactive le cache
+- `audit.go` : `AuditLog` — une ligne JSON par requête (utilisateur, SQL, durée, nb lignes, succès/erreur, cache hit ou non), fichier ouvert en append-only
+
+**Un choix de conception qui a évité un bug avant même de l'écrire** : `request()` fixe explicitement `Content-Length: 0` sur toute requête sans corps — leçon directement reprise du bug ClickHouse `411 Length Required` trouvé dans `rust/bootstrap` (M1.2) et revérifié dans `engine/schemamgr` (M1.3). Cette fois, corrigé dès l'écriture plutôt que découvert en testant.
+
+Validations rejouées :
+- `go build ./...`, `go vet ./...` → PASS
+- `go test ./engine/querybroker/...` → PASS, 17 tests dont **7 contre un vrai ClickHouse** (skip proprement si absent) :
+  - `SELECT ... FROM system.numbers` retourne de vraies lignes décodables
+  - une requête identique en 2ᵉ appel est servie par le cache (`Cached: true`)
+  - `RequestsPerMinute: 1` → 2ᵉ requête rejetée avec `resource_exhausted`
+  - `MaxRowsToRead: 1000` sur `SELECT sum(number) FROM numbers(1000000)` → ClickHouse interrompt lui-même la requête, erreur `resource_exhausted` propagée
+  - `Stream` livre 10 lignes de façon incrémentale sur `LIMIT 10`
+  - `Stream` sur `SELECT sleep(3)` avec un contexte à 200ms s'interrompt réellement en ~200ms, pas après les 3s
+  - `Stream` s'arrête proprement après exactement 3 appels quand le callback renvoie une erreur
+- **Un processus ClickHouse orphelin retrouvé et nettoyé à nouveau pendant cette session** (même cause qu'en M1.3 : `go run` laisse le binaire compilé tourner même après avoir tué son propre PID wrapper) — cette fois identifié directement via le chemin `exe/bootstrap` dans `ps aux`
+- `scripts/validation/test-secrets-no-leak.sh` → OK
+
+**Pas encore fait** : le broker n'est monté dans aucun serveur HTTP réel (comme `schemamgr`, dépend de M1.5) ; pas de limite de taille de résultat côté `Execute` (un résultat énorme sans `LIMIT` explicite serait entièrement bufferisé en mémoire — `Stream` est la bonne réponse à ce cas, mais rien n'empêche aujourd'hui un appelant d'utiliser `Execute` par erreur sur une grosse requête).
 
 ### M1.5 — API & Auth (Go)
 - [ ] Implémenter serveur HTTP/2 + TLS optionnel + CORS dev
