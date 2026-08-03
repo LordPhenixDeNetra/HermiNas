@@ -274,12 +274,38 @@ Validations rejouées :
 **Pas encore fait** : le broker n'est monté dans aucun serveur HTTP réel (comme `schemamgr`, dépend de M1.5) ; pas de limite de taille de résultat côté `Execute` (un résultat énorme sans `LIMIT` explicite serait entièrement bufferisé en mémoire — `Stream` est la bonne réponse à ce cas, mais rien n'empêche aujourd'hui un appelant d'utiliser `Execute` par erreur sur une grosse requête).
 
 ### M1.5 — API & Auth (Go)
-- [ ] Implémenter serveur HTTP/2 + TLS optionnel + CORS dev
-- [ ] Implémenter JWT (sessions UI) + tokens API révocables scopés
-- [ ] Implémenter RBAC middleware (4 rôles)
-- [ ] Implémenter routes : `/api/v1/query`, `/api/v1/datasets`, `/api/v1/ingest/{dataset}`, `/api/v1/health`
-- [ ] Implémenter rate limiting HTTP par IP/token
-- [ ] Tests : `go test ./...` couvrant auth, quotas, query broker
+- [x] Implémenter serveur HTTP/2 + TLS optionnel + CORS dev
+- [x] Implémenter JWT (sessions UI) + tokens API révocables scopés
+- [x] Implémenter RBAC middleware (4 rôles)
+- [x] Implémenter routes : `/api/v1/query`, `/api/v1/datasets`, `/api/v1/ingest/{dataset}`, `/api/v1/health`
+- [x] Implémenter rate limiting HTTP par IP/token
+- [x] Tests : `go test ./...` couvrant auth, quotas, query broker
+
+**État actuel (2026-08-03)**
+
+Fichiers matérialisés :
+- Nouveau package `engine/auth/` : `store.go` (utilisateurs bcrypt + tokens API — seul le hash SHA-256 du token est stocké, jamais la valeur brute, même discipline que `SecretString` en M0.4), `jwt.go` (`golang-jwt/jwt/v5`, sessions courte durée), `middleware.go` (`Authenticate` accepte JWT **ou** token API sur le même header `Authorization: Bearer`, `RequireRole`, `RequireDatasetScope`)
+- Nouveau package `engine/api/` : `server.go` (TLS optionnel, CORS dev), `ratelimit.go` (fenêtre glissante par IP, appliquée avant l'authentification), `routes.go` (assemble tout), `ingest.go` + `ddl_executor.go` (insertion et DDL réels contre ClickHouse)
+- `engine/schemamgr/http.go` étendu : `DDLExecutor` (interface), `Handler.WithDDLExecutor(...)` — voir bug ci-dessous
+- `engine/schemamgr/ddl.go` étendu : `GenerateAlterDDL()` pour l'évolution de schéma (`ALTER TABLE ... ADD COLUMN`, distinct de `GenerateDDL()` qui ne fait que `CREATE TABLE IF NOT EXISTS`)
+
+**Un vrai bug d'architecture trouvé par le test d'intégration bout-en-bout, pas avant** : `POST /api/v1/datasets` persistait la définition en SQLite mais **n'exécutait jamais le DDL contre ClickHouse** — la table physique n'existait tout simplement pas. Le test complet (créer un dataset puis y ingérer une ligne) a échoué avec `Code: 60. UNKNOWN_TABLE`, révélant que `schemamgr` (M1.3) avait été conçu et testé comme un pur gestionnaire de métadonnées, sans jamais brancher l'exécution réelle du DDL généré — un angle mort resté invisible tant qu'aucun test n'enchaînait création + ingestion. Corrigé en ajoutant l'interface `schemamgr.DDLExecutor` (optionnelle, `nil` par défaut pour garder les tests unitaires de `schemamgr` sans dépendance ClickHouse) et son implémentation réelle `api.ClickHouseDDLExecutor` ; `POST /api/v1/datasets` et `POST /.../columns` exécutent désormais le DDL pour de vrai, et l'endpoint d'ingestion s'assure aussi que la table existe (avec un cache mémoire par process pour ne pas rejouer le `CREATE TABLE IF NOT EXISTS` à chaque requête).
+
+**Routes non enregistrées, volontairement** : `NewRouter` ne monte que les 4 routes qui ont une vraie implémentation derrière (`health`, `query`, `datasets`, `ingest`) plus `auth/login`. Pipelines, alertes, ML, agents, admin/users n'existent pas encore (phases ultérieures) — un 404 honnête plutôt qu'un stub qui fait semblant de marcher.
+
+Validations rejouées :
+- `go build ./...`, `go vet ./...`, `go test ./...` → PASS sur tout le dépôt (packages `engine/auth`, `engine/api` inclus, 30+ nouveaux tests)
+- **Test bout-en-bout réel, serveur HTTP complet via `httptest.NewServer`, ClickHouse réel** (`TestFullAPIFlow_LoginQueryDatasetIngest`, skip proprement si absent) :
+  1. `POST /api/v1/auth/login` avec un vrai utilisateur bcrypt → JWT valide
+  2. `POST /api/v1/query` avec ce JWT → vraies lignes de `system.numbers`
+  3. `POST /api/v1/datasets` → dataset créé **et** table ClickHouse réellement créée (DDL exécuté)
+  4. Un compte `viewer` tentant de créer un dataset → `403` (RBAC vérifié en conditions réelles)
+  5. `POST /api/v1/ingest/{dataset}` avec un token scopé → `202`, ligne réellement insérée
+  6. Un token scopé sur un **autre** dataset → `403` sur ce même endpoint (scope vérifié, pas seulement le rôle)
+  7. Requête de vérification → la ligne ingérée est bien retrouvée par `SELECT`
+- `scripts/validation/test-secrets-no-leak.sh` → OK
+
+**Pas encore fait** : agrégation de la santé des services dans `/api/v1/health` (dépend du superviseur, qui vit dans `bootstrap.go`, pas dans ce package) ; pas de commande CLI/route pour révoquer un token autrement qu'en appelant `Store.RevokeAPIToken` directement (pas de route `/api/v1/admin/tokens`, hors périmètre M1.5).
 
 ### M1.6 — Query Studio (React)
 - [ ] Initialiser `interfaces/web/` : Vite + React + TypeScript + Zustand + TanStack Query

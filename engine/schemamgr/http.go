@@ -1,11 +1,23 @@
 package schemamgr
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
 	"herminas/kernel/errors"
 )
+
+// DDLExecutor applies generated DDL to the real ClickHouse engine.
+// Store only ever persists dataset *metadata* in SQLite — without an
+// executor wired in, `POST /api/v1/datasets` would record a definition
+// that never becomes an actual queryable table. Kept as an interface
+// (rather than schemamgr depending on ClickHouse HTTP directly) so this
+// package's own tests stay dependency-free; engine/api provides the real
+// implementation, backed by ClickHouse's HTTP interface.
+type DDLExecutor interface {
+	Exec(ctx context.Context, ddl string) error
+}
 
 // Handler exposes Store over HTTP. A thin net/http.ServeMux (Go 1.22+
 // method+path patterns, no router dependency) so it's ready to mount into
@@ -13,10 +25,19 @@ import (
 // mounting it into a server that doesn't exist yet would be premature.
 type Handler struct {
 	store *Store
+	ddl   DDLExecutor // nil is valid: metadata-only, no ClickHouse side effect (used by this package's own tests)
 }
 
 func NewHandler(store *Store) *Handler {
 	return &Handler{store: store}
+}
+
+// WithDDLExecutor makes Create/AddColumns also apply the generated DDL to
+// a real ClickHouse, instead of only persisting metadata. Returns h for
+// chaining at the call site.
+func (h *Handler) WithDDLExecutor(ddl DDLExecutor) *Handler {
+	h.ddl = ddl
+	return h
 }
 
 // Routes returns the /api/v1/datasets* handlers described in the cahier
@@ -57,6 +78,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+
+	if h.ddl != nil {
+		if err := h.ddl.Exec(r.Context(), GenerateDDL(created)); err != nil {
+			writeError(w, http.StatusInternalServerError, "dataset metadata created but ClickHouse table creation failed: "+err.Error())
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -98,11 +127,20 @@ func (h *Handler) addColumns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, err := h.store.AddColumns(r.PathValue("name"), req.Columns)
+	name := r.PathValue("name")
+	d, err := h.store.AddColumns(name, req.Columns)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
+
+	if h.ddl != nil {
+		if err := h.ddl.Exec(r.Context(), GenerateAlterDDL(name, req.Columns)); err != nil {
+			writeError(w, http.StatusInternalServerError, "dataset metadata evolved but ClickHouse ALTER TABLE failed: "+err.Error())
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, d)
 }
 

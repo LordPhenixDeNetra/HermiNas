@@ -46,6 +46,28 @@ func GenerateDDL(d Dataset) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// GenerateAlterDDL turns newly-added columns into an `ALTER TABLE ... ADD
+// COLUMN` statement — GenerateDDL's `CREATE TABLE IF NOT EXISTS` doesn't
+// add columns to a table that already exists, so evolving a dataset
+// (Store.AddColumns) needs this instead, applied only to the columns that
+// are actually new.
+func GenerateAlterDDL(datasetName string, newColumns []Column) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "ALTER TABLE %s\n", quoteIdent(datasetName))
+	for i, col := range newColumns {
+		colType := col.Type
+		if col.Nullable {
+			colType = fmt.Sprintf("Nullable(%s)", colType)
+		}
+		sep := ","
+		if i == len(newColumns)-1 {
+			sep = ""
+		}
+		fmt.Fprintf(&b, "    ADD COLUMN %s %s%s\n", quoteIdent(col.Name), colType, sep)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // quoteIdent backtick-quotes a ClickHouse identifier. Datasets/columns
 // come from InferColumns (JSON field names) or dataset-creation requests,
 // neither validated against a strict charset, so quoting is the cheap way
