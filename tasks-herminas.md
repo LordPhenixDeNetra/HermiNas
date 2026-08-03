@@ -326,6 +326,8 @@ Frontend construit dans `web/` à la racine du dépôt (pas sous `interfaces/web
 
 Stack : Vite 6.4.3 + React 19 + TypeScript 6 + Zustand (stores `auth`/`theme` persistés en `localStorage`) + TanStack Query + React Router v7 + `@monaco-editor/react`. Pages/composants livrés : `Login`, `ProtectedRoute`, `Layout` (nav + bascule thème clair/sombre via `useSyncTheme`), `QueryStudio` (éditeur Monaco SQL, exécution, tableau résultats, autocomplétion, historique, export), `ResultsTable`. Client API typé dans `src/api/client.ts` (`login`, `runQuery`, `listDatasets`).
 
+**Ajout post-M1.6 (2026-08-03) : migration vers Tailwind CSS v4.** À la demande explicite de l'utilisateur (pas dans le cahier des charges initial), `@tailwindcss/vite` + `tailwindcss` v4.3.3 ont été ajoutés et tous les composants existants migrés des classes CSS écrites à la main vers des utilitaires Tailwind. Les variables de thème existantes (`--bg`, `--surface`, `--accent`, etc.) restent la source de vérité et sont exposées à Tailwind via `@theme inline` dans `index.css` — la bascule clair/sombre continue de fonctionner sans classes `dark:` puisque les utilitaires résolvent `var(--bg)` etc. au runtime. Les deux seules primitives partagées (`button`, `input`) passent par `@layer components` (`.btn`, `.btn-primary`, `.input`) plutôt que par un composant React `<Button>` — pas de nouvelle abstraction introduite pour une migration. Une revue UI/UX avec le skill tiers `ui-ux-pro-max` (installé manuellement dans `.claude/skills/`, non commité) a aussi corrigé au passage : une icône emoji remplacée par du SVG, l'absence totale de transitions CSS, un header non responsive sous 600px, et une `key={i}` React sur une liste réordonnée. Vérifié : `npm run build`/`test`/`lint` + un smoke E2E réel via `go run . serve-api` servant `web/dist`.
+
 **Bug de souveraineté trouvé et corrigé** : `@monaco-editor/react` charge Monaco depuis `cdn.jsdelivr.net` par défaut au runtime — repéré en inspectant le bundle de production (`dist/assets/*.js` contenait l'URL du CDN en clair), pas par un test. Incompatible avec le déploiement air-gapped explicitement supporté par le cahier des charges (§7.3). Corrigé par un self-hosting complet dans `src/monacoSetup.ts` : import de `monaco-editor/editor/editor.api` (cœur seul, pas le barrel complet `monaco-editor` qui embarque 60+ langages ≈4 Mo), enregistrement manuel du langage SQL (`monaco-editor/languages/definitions/sql/sql` — cette version de monaco-editor n'expose plus de module `sql.contribution` auto-enregistrant), worker Monaco bundlé via le suffixe `?worker` de Vite, puis `loader.config({ monaco })` pour donner à `@monaco-editor/react` l'instance déjà chargée. Vérifié par grep sur le bundle final : une seule référence CDN résiduelle subsiste, mais c'est une chaîne inerte dans le code de fallback du loader, jamais atteinte au runtime puisque `loader.config` court-circuite ce chemin — **vérifié par lecture du bundle et raisonnement sur le chemin de code, pas par inspection réseau dans un vrai navigateur** (aucun outil de navigateur automatisé n'est disponible dans cet environnement).
 
 **Dépendances ajustées pendant l'implémentation** : Vite rétrogradé de la v8 (auto-installée par `npm create vite@latest`, basée sur Rolldown) à `^6.4.3` — Rolldown ne résolvait pas l'import du worker Monaco. `vitest`/`@vitest/ui` montés à `^3.2.7` pour éviter une double copie imbriquée de `vite` dans `node_modules` qui cassait le typage de `vite.config.ts`. Taille du bundle final : `index-*.js` 2,98 Mo (791 Ko gzip) + `editor.worker-*.js` 274 Ko + CSS 83 Ko (13 Ko gzip) — gros mais attendu pour un éditeur Monaco complet ; un découpage par `import()` dynamique est possible plus tard si nécessaire, non fait ici.
@@ -379,11 +381,39 @@ Validation rejouée :
 ## Phase M2 — Dashboards temps réel (3 semaines)
 
 ### M2.1 — WebSocket & data feed (Go)
-- [ ] Implémenter hub WebSocket (goroutine par client, heartbeat)
-- [ ] Implémenter souscriptions widgets : requête + intervalle → push `dashboard.data`
-- [ ] Implémenter mode streaming : requêtes incrémentales (depuis dernier timestamp)
-- [ ] Implémenter événements `system.health` et `agent.status`
-- [ ] Rate limiting messages WebSocket
+- [x] Implémenter hub WebSocket (goroutine par client, heartbeat)
+- [x] Implémenter souscriptions widgets : requête + intervalle → push `dashboard.data`
+- [x] Implémenter mode streaming : requêtes incrémentales (depuis dernier timestamp)
+- [x] Implémenter événements `system.health` et `agent.status` — `system.health` a un vrai producteur ; `agent.status` non (cf. note)
+- [x] Rate limiting messages WebSocket
+
+**État actuel (2026-08-03)**
+
+Nouveau package `engine/wshub` : `Hub` (registre de clients + fan-out des broadcasts, un seul mutex), `Client` (une connexion = deux goroutines `readPump`/`writePump`, le split idiomatique gorilla/websocket pour qu'un lecteur lent ne bloque pas les pings sortants), `subscriptionSet` (une goroutine par souscription de widget, indépendante des autres widgets de la même connexion).
+
+**Heartbeat** : `writePump` envoie un ping toutes les 54s (`pingPeriod = 90% de pongWait`) ; `readPump` repousse sa deadline de lecture à chaque pong reçu (`SetPongHandler`) et ferme la connexion si aucun pong n'arrive sous 60s — pattern standard gorilla/websocket (chat example), pas une invention maison.
+
+**Souscriptions widgets** : un client envoie `{"action":"subscribe","widget_id":...,"sql":...,"interval_ms":...}` ; le hub exécute la requête via `querybroker.Broker` (adaptateur `brokerQueryRunner` dans `bootstrap.go`) sur l'intervalle demandé (plancher 250ms pour éviter qu'un widget mal configuré ne marteler ClickHouse) et pousse `dashboard.data`. `{"action":"unsubscribe","widget_id":...}` arrête le poller correspondant ; la déconnexion du client annule toutes ses souscriptions.
+
+**Mode streaming incrémental** : `"mode":"incremental","since_column":"..."` fait que chaque poll après le premier enveloppe la requête (`SELECT * FROM (<sql>) AS w WHERE <since_column> > '<dernier_max_vu>'`) et ne pousse que s'il y a de nouvelles lignes — pas de `dashboard.data` vide à chaque tick sans changement. La comparaison du timestamp est lexicographique sur le texte JSON brut (correcte pour le rendu `DateTime`/`DateTime64` à largeur fixe de ClickHouse, documentée comme non générique dans le code).
+
+**`system.health`** : `bootstrap.go` démarre un vrai poller (`startSystemHealthPoller`) qui interroge `/ping` sur ClickHouse toutes les 10s et diffuse l'état à tous les clients connectés — indépendant du superviseur (`serve-api` ne le démarre pas, il ne connaît que l'URL ClickHouse).
+
+**`agent.status` — gap honnête** : `Hub.BroadcastAgentStatus` existe et est testé (payload conforme au schéma), mais **aucun producteur réel ne l'appelle**. Le control plane Go ne maintient aucun registre de connexions d'agents aujourd'hui — le récepteur gRPC vit côté Rust (`rust/bootstrap/src/receiver.rs`) sans exposer d'événements connect/disconnect à Go. Câbler un vrai producteur est un travail futur, pas un oubli silencieux.
+
+**Authentification WebSocket** : le JWT voyage en query param `?token=` (pas en en-tête `Authorization`) car l'API `WebSocket` native des navigateurs ne permet pas d'en-têtes personnalisés — vérifié avec le même `auth.JWTManager` que les routes HTTP, avant l'upgrade de la connexion.
+
+**Validation des messages sortants** : nouveau `kernel/schemas.LoadWebSocketSchemas()` + `ValidateEnvelope()` (basé sur `go:embed`, donc indépendant du répertoire de travail du process, contrairement au compilateur du fichier de test existant qui utilise des chemins relatifs). Le `Hub` refuse d'envoyer tout message qui ne validerait pas contre les schémas JSON de M0.3 — vérifié par des tests qui prouvent qu'un payload `system.health` incomplet est bien rejeté et qu'un `agent.status` valide passe.
+
+**Rate limiting** : compteur à fenêtre fixe par client (pas par IP comme `engine/api.RateLimit`, chaque `Client` étant déjà un état isolé), 20 messages de contrôle/s — un client qui dépasse voit ses messages ignorés, pas sa connexion coupée.
+
+**Route** : `/api/v1/ws` montée sur un `http.ServeMux` de plus haut niveau dans `bootstrap.go`, à côté (pas à l'intérieur) du routeur de `engine/api` — évite une dépendance `engine/api` → `engine/wshub` ; `net/http.ServeMux` (Go 1.22+) route ce motif exact vers le hub et laisse tout le reste passer vers le routeur API existant.
+
+Validation :
+- `go test ./engine/wshub/... ./kernel/schemas/... -race -v` → PASS (11 + 1 tests), aucune race — tests end-to-end réels avec un vrai client `gorilla/websocket` dialant un `httptest.Server`, vraie vérification JWT, vraie validation de schéma
+- `go build ./... && go vet ./... && go test ./...` → PASS, aucune régression
+- Smoke E2E manuel réel : superviseur (`go run . run`) + ClickHouse réels démarrés, `serve-api` démarré, connexion WebSocket réelle depuis un petit client Go, `SELECT number FROM system.numbers LIMIT 5` souscrit avec `interval_ms:1000` → réception réelle de `dashboard.data` avec les vraies lignes ClickHouse à intervalle régulier, réception réelle de `system.health` en parallèle
+- Régression complète Go/Rust/Python + `test-secrets-no-leak.sh` → PASS
 
 ### M2.2 — Dashboards UI (React)
 - [ ] Implémenter `pages/Dashboards.tsx` : grille responsive de widgets (drag/resize)

@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -35,9 +36,11 @@ import (
 	"herminas/engine/redpanda"
 	"herminas/engine/schemamgr"
 	"herminas/engine/supervisor"
+	"herminas/engine/wshub"
 	"herminas/kernel/errors"
 	"herminas/kernel/paths"
 	"herminas/kernel/permissions"
+	wsschemas "herminas/kernel/schemas"
 	"herminas/kernel/settings"
 )
 
@@ -207,9 +210,12 @@ func serveAPI() {
 		staticDir = "web/dist"
 	}
 
+	jwtManager := auth.NewJWTManager(jwtSecretFromEnv(), time.Hour)
+	devCORS := os.Getenv("HERMINAS_DEV_CORS") == "1"
+
 	router := api.NewRouter(api.Deps{
 		AuthStore:          authStore,
-		JWTManager:         auth.NewJWTManager(jwtSecretFromEnv(), time.Hour),
+		JWTManager:         jwtManager,
 		Schemas:            schemas,
 		Broker:             broker,
 		Inserter:           api.NewInserter(clickhouseURL),
@@ -218,11 +224,27 @@ func serveAPI() {
 		StaticDir:          staticDir,
 	})
 
+	// M2.1: the WebSocket hub lives outside engine/api (a sibling layer,
+	// not nested under it) so engine/api doesn't need to depend on it;
+	// mounting "/api/v1/ws" on an outer mux ahead of the API router is
+	// enough for Go 1.22's ServeMux to route that one exact path to the
+	// hub and everything else through to the router unchanged.
+	wsSchemas, err := wsschemas.LoadWebSocketSchemas()
+	if err != nil {
+		exitf("load websocket schemas: %v", err)
+	}
+	hub := wshub.New(wsSchemas)
+	mux := http.NewServeMux()
+	mux.Handle("/api/v1/ws", wshub.ServeWS(hub, jwtManager, brokerQueryRunner{broker}, devCORS))
+	mux.Handle("/", router)
+
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort())
-	srv := api.NewServer(api.Config{Addr: addr, DevCORS: os.Getenv("HERMINAS_DEV_CORS") == "1"}, router)
+	srv := api.NewServer(api.Config{Addr: addr, DevCORS: devCORS}, mux)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	startSystemHealthPoller(ctx, hub, clickhouseURL)
 
 	go func() {
 		<-ctx.Done()
@@ -237,6 +259,61 @@ func serveAPI() {
 		exitf("api server failed: %v", err)
 	}
 	fmt.Println("herminas-api: stopped cleanly")
+}
+
+// brokerQueryRunner adapts *querybroker.Broker (M1.4) to wshub.QueryRunner
+// (M2.1) — the two packages don't need to know about each other beyond
+// this shape, matching how api.NewClickHouseDDLExecutor adapts ClickHouse
+// to schemamgr.DDLExecutor.
+type brokerQueryRunner struct {
+	broker *querybroker.Broker
+}
+
+func (r brokerQueryRunner) Execute(ctx context.Context, userID, sql string) (wshub.QueryResult, error) {
+	result, err := r.broker.Execute(ctx, userID, sql)
+	if err != nil {
+		return wshub.QueryResult{}, err
+	}
+	return wshub.QueryResult{Rows: result.Rows}, nil
+}
+
+// startSystemHealthPoller pings ClickHouse every 10s and broadcasts the
+// result as a system.health event (M2.1). It's deliberately independent
+// of engine/supervisor's own health checks — serve-api doesn't start or
+// own the supervisor (that's the separate "run" mode), it only knows
+// ClickHouse's URL, so this is a minimal, honest ping rather than a
+// re-use of machinery that isn't running in this process.
+func startSystemHealthPoller(ctx context.Context, hub *wshub.Hub, clickhouseURL string) {
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	poll := func() {
+		state, message := "healthy", ""
+		resp, err := client.Get(clickhouseURL + "/ping")
+		switch {
+		case err != nil:
+			state, message = "unhealthy", err.Error()
+		case resp.StatusCode != http.StatusOK:
+			state, message = "unhealthy", fmt.Sprintf("ping returned HTTP %d", resp.StatusCode)
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		_ = hub.BroadcastSystemHealth("clickhouse", state, message, time.Now().UTC().Format(time.RFC3339))
+	}
+
+	go func() {
+		poll()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				poll()
+			}
+		}
+	}()
 }
 
 // jwtSecretFromEnv reads HERMINAS_JWT_SECRET, or falls back to an
