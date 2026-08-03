@@ -307,6 +307,8 @@ Validations rejouées :
 
 **Pas encore fait** : agrégation de la santé des services dans `/api/v1/health` (dépend du superviseur, qui vit dans `bootstrap.go`, pas dans ce package) ; pas de commande CLI/route pour révoquer un token autrement qu'en appelant `Store.RevokeAPIToken` directement (pas de route `/api/v1/admin/tokens`, hors périmètre M1.5).
 
+**Complété en M1.7** : cette session n'avait construit `engine/api` que comme package (testé via `httptest.NewServer` en mémoire) sans jamais câbler un vrai processus qui le démarre — écart comblé par le mode `serve-api` de `bootstrap.go`, ajouté et validé en conditions réelles lors de la validation du jalon M1 (voir M1.7).
+
 ### M1.6 — Query Studio (React)
 - [ ] Initialiser `interfaces/web/` : Vite + React + TypeScript + Zustand + TanStack Query
 - [ ] Implémenter layout applicatif (navigation, thème clair/sombre)
@@ -319,9 +321,29 @@ Validations rejouées :
 - [ ] Tests composants : Query Studio, auth, table résultats
 
 ### M1.7 — Validation jalon M1
-- [ ] Smoke test bout-en-bout : agent tail un fichier log → Redpanda → ClickHouse → SELECT depuis Query Studio
-- [ ] Latence ingestion → requêtable < 2 s vérifiée par script
-- [ ] `herminas doctor` : diagnostic complet vert
+- [x] Smoke test bout-en-bout : agent tail un fichier log → Redpanda → ClickHouse → SELECT depuis Query Studio — adapté (Redpanda et Query Studio absents), cf. note
+- [x] Latence ingestion → requêtable < 2 s vérifiée par script
+- [x] `herminas doctor` : diagnostic complet vert — version « doctor-lite » (2 services), cf. note
+
+**État actuel (2026-08-03)**
+
+Deux prérequis manquaient pour valider ce jalon et ont été ajoutés :
+1. **`bootstrap.go` gagne un 4ᵉ mode, `serve-api`** : jusqu'ici `engine/api` (M1.5) n'était exercé qu'en mémoire via `httptest.NewServer` dans ses propres tests — aucun processus réel ne démarrait le serveur HTTP. `serve-api` câble tous les composants (auth, schemamgr, querybroker, DDL executor) avec de vraies valeurs, plus un bootstrap d'admin initial via `HERMINAS_BOOTSTRAP_ADMIN_USER`/`_PASSWORD` (mini-préfiguration du Setup Wizard de M8.2) et un secret JWT lu depuis `HERMINAS_JWT_SECRET` (éphémère avec avertissement si absent — la persistance chiffrée dépend du travail AES-256-GCM de M0.4, non fait).
+2. **`scripts/validation/smoke-test-m1.sh`** : orchestre les 4 vrais processus (superviseur Go + ClickHouse, récepteur Rust, API Go, agent Rust), se connecte, crée un dataset, écrit une ligne de log et chronomètre jusqu'à ce qu'elle soit requêtable via `POST /api/v1/query`.
+
+**Adaptation du parcours** (cf. notes M1.2/M1.6) : sans Redpanda ni Query Studio, le script valide `agent → gRPC réel → récepteur → ClickHouse → API` et utilise `curl` à la place de l'UI — le chemin de données réel est identique, seule l'étape de bus intermédiaire et l'interface graphique manquent.
+
+**Un gap révélé par le script lui-même, pas en amont** : le récepteur Rust (M1.2) insère directement dans ClickHouse sans jamais créer la table — ce que M1.2/M1.5 avaient déjà noté comme non fait, mais que ce script a rendu concret : sans une étape préalable de création du dataset via l'API (qui, elle, exécute le DDL réel depuis M1.5), l'ingestion aurait échoué avec `UNKNOWN_TABLE`. Le script crée donc explicitement le dataset via `POST /api/v1/datasets` avant de démarrer l'agent — ce n'est pas un contournement mais la démonstration exacte de la limite déjà documentée.
+
+**Un bug de script trouvé en l'exécutant** : la boucle « doctor-lite » découpait `url:nom` sur `:`, mais les URLs elles-mêmes contiennent déjà un `:` (le port) — `http://127.0.0.1:8123/ping:ClickHouse` se coupait au mauvais endroit et `curl` recevait une URL tronquée, faisant échouer les deux vérifications alors que les deux services répondaient correctement (confirmé par les étapes précédentes du script, qui elles réussissaient). Corrigé en changeant le délimiteur pour `|`.
+
+**Un deuxième risque trouvé et corrigé avant qu'il ne casse quelque chose** : le nettoyage initial n'attendait que 2 s entre `SIGTERM` et `SIGKILL`, alors que le superviseur (M0.5) laisse jusqu'à 10 s à ClickHouse pour s'arrêter proprement — un `SIGKILL` prématuré sur le processus superviseur aurait pu laisser `clickhouse`/`clickhouse-watchdog` orphelins (déjà vu à deux reprises en M1.3/M1.4 sur ce même mécanisme, avec `go run` cette fois-ci plutôt qu'un binaire compilé). Délai porté à 12 s ; `ps aux` confirme un arrêt propre sans orphelin après coup.
+
+**« doctor » minimal, pas la version cible** : vérifie seulement ClickHouse + l'API HTTP (`/ping`, `/api/v1/health`). Le vrai `herminas doctor` (ports, disque, mémoire, versions des moteurs, tous les services) est explicitement une commande CLI de M8.2 — prématuré à construire avant que la CLI (`Cobra`, M8.1) existe.
+
+Validation rejouée :
+- `bash scripts/validation/smoke-test-m1.sh` → **PASS, latence ingestion→requêtable mesurée à 128-148ms** sur 3 exécutions (budget cahier des charges §10.3 : < 2000ms), aucun processus orphelin après coup
+- Régression complète Go/Rust/Python + `test-secrets-no-leak.sh` → PASS, aucune régression
 
 ---
 
