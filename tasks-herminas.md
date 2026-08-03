@@ -310,15 +310,44 @@ Validations rejouées :
 **Complété en M1.7** : cette session n'avait construit `engine/api` que comme package (testé via `httptest.NewServer` en mémoire) sans jamais câbler un vrai processus qui le démarre — écart comblé par le mode `serve-api` de `bootstrap.go`, ajouté et validé en conditions réelles lors de la validation du jalon M1 (voir M1.7).
 
 ### M1.6 — Query Studio (React)
-- [ ] Initialiser `interfaces/web/` : Vite + React + TypeScript + Zustand + TanStack Query
-- [ ] Implémenter layout applicatif (navigation, thème clair/sombre)
-- [ ] Implémenter `pages/QueryStudio.tsx` : Monaco Editor SQL + exécution + tableau résultats
-- [ ] Implémenter autocomplétion SQL (datasets + colonnes depuis l'API)
-- [ ] Implémenter historique de requêtes (local + serveur)
-- [ ] Implémenter export CSV/JSON des résultats
-- [ ] Implémenter `pages/Login.tsx` + gestion session JWT
-- [ ] Build statique servi par Go (fallback SPA)
-- [ ] Tests composants : Query Studio, auth, table résultats
+- [x] Initialiser `web/` (à la racine, pas `interfaces/web/` — cf. note) : Vite + React + TypeScript + Zustand + TanStack Query
+- [x] Implémenter layout applicatif (navigation, thème clair/sombre)
+- [x] Implémenter `pages/QueryStudio.tsx` : Monaco Editor SQL + exécution + tableau résultats
+- [x] Implémenter autocomplétion SQL (datasets + colonnes depuis l'API)
+- [x] Implémenter historique de requêtes (local uniquement — cf. note)
+- [x] Implémenter export CSV/JSON des résultats — CSV fait, JSON non (cf. note)
+- [x] Implémenter `pages/Login.tsx` + gestion session JWT
+- [x] Build statique servi par Go (fallback SPA)
+- [x] Tests composants : Query Studio, auth, table résultats
+
+**État actuel (2026-08-03)**
+
+Frontend construit dans `web/` à la racine du dépôt (pas sous `interfaces/web/` comme suggéré initialement — cohérent avec le monorepo polyglotte qui a déjà `go.mod`/`rust/`/`python/` à la racine, plutôt que d'introduire un niveau `interfaces/` qui n'existe nulle part ailleurs).
+
+Stack : Vite 6.4.3 + React 19 + TypeScript 6 + Zustand (stores `auth`/`theme` persistés en `localStorage`) + TanStack Query + React Router v7 + `@monaco-editor/react`. Pages/composants livrés : `Login`, `ProtectedRoute`, `Layout` (nav + bascule thème clair/sombre via `useSyncTheme`), `QueryStudio` (éditeur Monaco SQL, exécution, tableau résultats, autocomplétion, historique, export), `ResultsTable`. Client API typé dans `src/api/client.ts` (`login`, `runQuery`, `listDatasets`).
+
+**Bug de souveraineté trouvé et corrigé** : `@monaco-editor/react` charge Monaco depuis `cdn.jsdelivr.net` par défaut au runtime — repéré en inspectant le bundle de production (`dist/assets/*.js` contenait l'URL du CDN en clair), pas par un test. Incompatible avec le déploiement air-gapped explicitement supporté par le cahier des charges (§7.3). Corrigé par un self-hosting complet dans `src/monacoSetup.ts` : import de `monaco-editor/editor/editor.api` (cœur seul, pas le barrel complet `monaco-editor` qui embarque 60+ langages ≈4 Mo), enregistrement manuel du langage SQL (`monaco-editor/languages/definitions/sql/sql` — cette version de monaco-editor n'expose plus de module `sql.contribution` auto-enregistrant), worker Monaco bundlé via le suffixe `?worker` de Vite, puis `loader.config({ monaco })` pour donner à `@monaco-editor/react` l'instance déjà chargée. Vérifié par grep sur le bundle final : une seule référence CDN résiduelle subsiste, mais c'est une chaîne inerte dans le code de fallback du loader, jamais atteinte au runtime puisque `loader.config` court-circuite ce chemin — **vérifié par lecture du bundle et raisonnement sur le chemin de code, pas par inspection réseau dans un vrai navigateur** (aucun outil de navigateur automatisé n'est disponible dans cet environnement).
+
+**Dépendances ajustées pendant l'implémentation** : Vite rétrogradé de la v8 (auto-installée par `npm create vite@latest`, basée sur Rolldown) à `^6.4.3` — Rolldown ne résolvait pas l'import du worker Monaco. `vitest`/`@vitest/ui` montés à `^3.2.7` pour éviter une double copie imbriquée de `vite` dans `node_modules` qui cassait le typage de `vite.config.ts`. Taille du bundle final : `index-*.js` 2,98 Mo (791 Ko gzip) + `editor.worker-*.js` 274 Ko + CSS 83 Ko (13 Ko gzip) — gros mais attendu pour un éditeur Monaco complet ; un découpage par `import()` dynamique est possible plus tard si nécessaire, non fait ici.
+
+**Build statique servi par Go** : `engine/api/static.go` ajoute `SPAHandler(dir)` (sert les fichiers réels de `web/dist`, retombe sur `index.html` pour toute route non-fichier — routage client React Router) et `staticDirAvailable(dir)` (n'active la route que si `web/dist/index.html` existe, pour ne pas casser le dev API-only sans frontend buildé). `routes.go` monte `SPAHandler` sur `/` uniquement si `Deps.StaticDir` pointe vers un répertoire valide ; comme `net/http.ServeMux` (Go 1.22+) priorise les motifs les plus spécifiques, `/api/v1/...` n'est jamais masqué par ce catch-all. `bootstrap.go` (`serve-api`) lit `HERMINAS_STATIC_DIR` (défaut `web/dist`). Testé en conditions réelles : build de production (`npm run build`), démarrage de `serve-api` sans frontend pré-construit puis avec, `curl` sur `/` (sert `index.html`, titre « HermiNas »), sur une route client profonde `/query-studio/...` (retombe bien sur `index.html`, pas de 404), sur un asset réel (`/assets/index-*.css`, 200 + bon `Content-Type`), et sur `/api/v1/health` + `/api/v1/auth/login` (toujours fonctionnels, non masqués par le catch-all).
+
+**Historique de requêtes** : seule la version locale (`localStorage`, 20 dernières requêtes) est faite. La persistance côté serveur (liée à `querybroker`'s audit log déjà écrit en M1.4) n'a pas de route HTTP dédiée — pas fait, pas juste oublié : `GET /api/v1/query/history` n'existe pas encore.
+
+**Export** : CSV fait (`exportResults.ts`). Export JSON non fait — le tableau de résultats est déjà du JSON côté client, l'ajouter est trivial mais n'a pas été fait faute de route/bouton dédié.
+
+**`npm audit` non forcé** : trois findings restent (`dompurify` modéré via le sanitizer de tooltip de Monaco — pas exploitable, aucun HTML non fiable n'est rendu ; `react-router` 7.12.0–8.2.0 haute sévérité « RSC Mode CSRF Bypass » — non applicable, l'app utilise `BrowserRouter` côté client pur, pas de React Server Components ; `esbuild` modéré — problème CORS du serveur de dev uniquement). `npm audit fix --force` rétrograderait `react-router-dom` à 7.11.0 et `monaco-editor` à 0.53.0, risquant de casser l'API déjà codée contre, pour des vulnérabilités jugées non applicables à l'usage réel de cette app — compromis documenté plutôt que corrigé aveuglément.
+
+**Limite de vérification assumée** : aucun outil de navigateur automatisé n'est disponible dans cet environnement. Ont été vérifiés réellement : tests de composants en jsdom (28/28 via Vitest), build de production réussi, serveur de dev accessible en HTTP (`curl` sur `localhost:5173`), et le serveur Go servant le build réel avec `curl` (racine, route SPA profonde, asset statique, login, health). Le rendu visuel effectif et les interactions souris/clavier dans un vrai navigateur n'ont pas été observés — à faire manuellement avant mise en production.
+
+Validation rejouée :
+- `cd web && npm run build` → succès (voir tailles ci-dessus)
+- `cd web && npm run test` → 28/28 tests passent (7 fichiers)
+- `go build ./... && go vet ./...` → OK ; `go test ./...` → PASS (nouveaux tests `engine/api/static_test.go` : `TestSPAHandlerServesRealAsset`, `TestSPAHandlerFallsBackToIndexForClientRoutes`, `TestStaticDirAvailable`, `TestNewRouterOmitsStaticRouteWhenUnset`)
+- `cargo test --workspace` (rust/) → PASS, y compris le round-trip réel contre ClickHouse
+- `python -m pytest` (python/, venv) → 4/4 PASS
+- `bash scripts/validation/test-secrets-no-leak.sh` → OK
+- Smoke E2E manuel : `go run . serve-api` avec `web/dist` réel → `/` sert le SPA (titre HermiNas), route profonde retombe sur `index.html`, asset CSS servi avec le bon `Content-Type`, `/api/v1/auth/login` et `/api/v1/health` toujours fonctionnels
 
 ### M1.7 — Validation jalon M1
 - [x] Smoke test bout-en-bout : agent tail un fichier log → Redpanda → ClickHouse → SELECT depuis Query Studio — adapté (Redpanda et Query Studio absents), cf. note

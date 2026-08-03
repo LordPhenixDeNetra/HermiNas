@@ -1,0 +1,271 @@
+:root {
+  --bg: #f7f7f9;
+  --surface: #ffffff;
+  --text: #1a1b1f;
+  --text-muted: #6b6b76;
+  --border: #e2e2e8;
+  --accent: #6d4aff;
+  --accent-contrast: #ffffff;
+  --danger: #c0392b;
+  --danger-bg: #fdecea;
+
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171d;
+    --surface: #1f2028;
+    --text: #f0f0f3;
+    --text-muted: #9a9aa5;
+    --border: #2e303a;
+    --accent: #9d80ff;
+    --accent-contrast: #16171d;
+    --danger: #ff6b5e;
+    --danger-bg: #3a1f1c;
+  }
+}
+
+/* Explicit user toggle (Layout's theme switch) wins over the OS setting
+   in both directions — the viewer's own choice should override the
+   system default. */
+:root[data-theme="dark"] {
+  --bg: #16171d;
+  --surface: #1f2028;
+  --text: #f0f0f3;
+  --text-muted: #9a9aa5;
+  --border: #2e303a;
+  --accent: #9d80ff;
+  --accent-contrast: #16171d;
+  --danger: #ff6b5e;
+  --danger-bg: #3a1f1c;
+}
+:root[data-theme="light"] {
+  --bg: #f7f7f9;
+  --surface: #ffffff;
+  --text: #1a1b1f;
+  --text-muted: #6b6b76;
+  --border: #e2e2e8;
+  --accent: #6d4aff;
+  --accent-contrast: #ffffff;
+  --danger: #c0392b;
+  --danger-bg: #fdecea;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button[type="submit"],
+.query-studio-actions button:first-child {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
+
+input {
+  font: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 8px 0;
+}
+
+.empty-state {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* --- Login --- */
+.login-page {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+}
+.login-form h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* --- App shell --- */
+.app-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.app-header .brand {
+  font-weight: 600;
+}
+.app-header nav {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+}
+.app-header nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.app-header nav a.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+main {
+  flex: 1;
+  padding: 20px;
+}
+
+/* --- Query Studio --- */
+.query-studio {
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 20px;
+  align-items: start;
+}
+.query-studio-editor {
+  grid-column: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.query-studio-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.query-studio-results {
+  grid-column: 1;
+}
+.query-studio-sidebar {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.query-studio-sidebar h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+.query-studio-sidebar ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.query-studio-sidebar li button {
+  width: 100%;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: none;
+  background: transparent;
+}
+
+@media (max-width: 900px) {
+  .query-studio {
+    grid-template-columns: 1fr;
+  }
+  .query-studio-sidebar {
+    grid-column: 1;
+  }
+}
+
+/* --- Results table --- */
+.results-table {
+  width: 100%;
+  overflow-x: auto;
+  display: block;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.results-table th,
+.results-table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.results-table th {
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+}

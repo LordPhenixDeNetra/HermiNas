@@ -164,7 +164,9 @@ func (s *Store) List() ([]Dataset, error) {
 	}
 	defer rows.Close()
 
-	var out []Dataset
+	// Initialized empty, not nil: an API consumer (web/src/api/client.ts)
+	// expects `[]` for "no datasets yet", not JSON `null`.
+	out := make([]Dataset, 0)
 	for rows.Next() {
 		var definition string
 		if err := rows.Scan(&definition); err != nil {
@@ -190,7 +192,7 @@ func (s *Store) Versions(name string) ([]Dataset, error) {
 	}
 	defer rows.Close()
 
-	var out []Dataset
+	out := make([]Dataset, 0)
 	for rows.Next() {
 		var definition string
 		if err := rows.Scan(&definition); err != nil {

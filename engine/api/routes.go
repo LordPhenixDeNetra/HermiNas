@@ -27,6 +27,7 @@ type Deps struct {
 	Inserter           *Inserter
 	DDL                schemamgr.DDLExecutor // applies generated DDL to ClickHouse; nil means metadata-only (tests)
 	RateLimitPerMinute int                   // per-IP, applied before auth; 0 disables it
+	StaticDir          string                // built frontend (web/dist); empty disables static serving (tests, API-only deploys)
 }
 
 // NewRouter wires the routes listed in cahier des charges §6.1 that exist
@@ -59,6 +60,10 @@ func NewRouter(deps Deps) http.Handler {
 
 	mux.Handle("POST /api/v1/ingest/{dataset}",
 		authenticate(auth.RequireDatasetScope(datasetFromPath)(ingestHandler(deps.Schemas, deps.DDL, deps.Inserter))))
+
+	if staticDirAvailable(deps.StaticDir) {
+		mux.Handle("/", SPAHandler(deps.StaticDir))
+	}
 
 	var handler http.Handler = mux
 	if deps.RateLimitPerMinute > 0 {

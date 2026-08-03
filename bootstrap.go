@@ -202,6 +202,11 @@ func serveAPI() {
 		exitf("bootstrap admin user: %v", err)
 	}
 
+	staticDir := os.Getenv("HERMINAS_STATIC_DIR")
+	if staticDir == "" {
+		staticDir = "web/dist"
+	}
+
 	router := api.NewRouter(api.Deps{
 		AuthStore:          authStore,
 		JWTManager:         auth.NewJWTManager(jwtSecretFromEnv(), time.Hour),
@@ -210,6 +215,7 @@ func serveAPI() {
 		Inserter:           api.NewInserter(clickhouseURL),
 		DDL:                api.NewClickHouseDDLExecutor(clickhouseURL),
 		RateLimitPerMinute: 600,
+		StaticDir:          staticDir,
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort())
@@ -226,7 +232,7 @@ func serveAPI() {
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	fmt.Printf("herminas-api: listening on %s (clickhouse: %s)\n", addr, clickhouseURL)
+	fmt.Printf("herminas-api: listening on %s (clickhouse: %s, static: %s)\n", addr, clickhouseURL, staticDir)
 	if err := srv.Start(); err != nil {
 		exitf("api server failed: %v", err)
 	}
